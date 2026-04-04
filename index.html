@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>MyTourTimes</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin=""
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700;1,800&display=swap"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260404-routefix20" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <img src="assets/mytourtimes-logo.png" alt="MyTourTimes" class="brand-logo" />
+          <div class="brand-wordmark">
+            <p class="brand-wordmark__eyebrow">MyFlight</p>
+            <h1>Tour Times</h1>
+            <p class="brand-wordmark__subhead">Weekly flight board</p>
+          </div>
+        </div>
+        <div class="topbar__actions" data-admin-only>
+          <label class="button">
+            Upload CSV
+            <input id="csvInput" type="file" accept=".csv,text/csv" hidden />
+          </label>
+          <button id="publishStateBtn" class="button button--ghost">Publish Weekly View</button>
+          <button id="clearSheetBtn" class="button button--ghost">Clear Sheet</button>
+          <button id="loadDemoBtn" class="button button--ghost">Load Demo</button>
+          <button id="downloadSummaryBtn" class="button button--ghost">Download Summary</button>
+          <button id="emailSummaryBtn" class="button button--ghost">Email Summary</button>
+          <button id="exportConfigBtn" class="button button--ghost">Export Config</button>
+          <label class="button button--ghost">
+            Import Config
+            <input id="importConfigInput" type="file" accept=".json,application/json" hidden />
+          </label>
+          <button id="adminLogoutBtn" class="button button--ghost">Sign Out</button>
+        </div>
+      </header>
+
+      <div id="statusBanner" class="status" hidden></div>
+      <div id="loadingOverlay" class="loading-overlay" hidden>
+        <div class="loading-card">
+          <div class="spinner" aria-hidden="true"></div>
+          <div>
+            <p class="panel__eyebrow">Working</p>
+            <h3 id="loadingMessage">Loading...</h3>
+          </div>
+        </div>
+      </div>
+
+      <section class="toolbar">
+        <div class="toolbar__group">
+          <button class="tab-button is-active" data-tab="dashboard">Dashboard</button>
+          <button class="tab-button" data-tab="flights">Flights</button>
+          <button id="adminTabButton" class="tab-button" data-tab="admin" data-admin-only>Admin Studio</button>
+        </div>
+        <div class="toolbar__group">
+          <div id="dateRangeLabel" class="date-range"></div>
+        </div>
+      </section>
+
+      <main>
+        <section id="dashboardTab" class="tab-panel is-active">
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Overview</p>
+                <h2>Flight Totals</h2>
+              </div>
+              <div id="csvMeta" class="panel__meta"></div>
+            </div>
+            <div id="summaryCards" class="summary-cards"></div>
+          </section>
+
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Locations</p>
+                <h2>Tour Dashboard</h2>
+              </div>
+            </div>
+            <div id="dashboardCards" class="dashboard-grid"></div>
+          </section>
+
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Breakdown</p>
+                <h2>Selected Location</h2>
+              </div>
+            </div>
+            <div id="dashboardDetail"></div>
+          </section>
+        </section>
+
+        <section id="flightsTab" class="tab-panel">
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Review</p>
+                <h2>Flight Log</h2>
+              </div>
+            </div>
+            <div class="panel-toolbar panel-toolbar--flight-log">
+              <label class="field field--search">
+                <span>Search Flights</span>
+                <input
+                  id="flightSearchInput"
+                  type="search"
+                  placeholder="Tail, location, tour, status, reason, zones..."
+                />
+              </label>
+              <div id="flightsMeta" class="panel__meta"></div>
+            </div>
+            <div class="table-wrap flights-table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Tail</th>
+                    <th>Take Off</th>
+                    <th>Landing</th>
+                    <th>Actual</th>
+                    <th>Location</th>
+                    <th>Matched Tour</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                    <th>Zones Hit</th>
+                  </tr>
+                </thead>
+                <tbody id="flightsTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Selected Flight</p>
+                <h2>Route Preview</h2>
+              </div>
+            </div>
+            <div class="flight-map-wrap">
+              <div id="flightMap" class="flight-map"></div>
+              <div id="flightMapMessage" class="map-empty-state" hidden></div>
+              <div id="flightMapOverlay" class="map-overlay-card" hidden></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Selected Flight</p>
+                <h2>Match Detail</h2>
+              </div>
+            </div>
+            <div id="flightDetail"></div>
+          </section>
+        </section>
+
+        <section id="adminTab" class="tab-panel" data-admin-only>
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Security</p>
+                <h2>Admin Access</h2>
+              </div>
+            </div>
+            <div id="adminGate" class="admin-gate"></div>
+          </section>
+
+          <div id="adminWorkspace" hidden>
+            <section class="panel">
+              <div class="panel__header">
+                <div>
+                  <p class="panel__eyebrow">Locations</p>
+                  <h2>Location Library</h2>
+                </div>
+                <button id="addLocationBtn" class="button button--ghost button--small">Add Location</button>
+              </div>
+              <div id="locationsSidebar" class="stack-list"></div>
+            </section>
+
+            <section class="panel panel--wide">
+              <div class="panel__header">
+                <div>
+                  <p class="panel__eyebrow">Editor</p>
+                  <h2 id="adminLocationTitle">Location Detail</h2>
+                </div>
+                <div class="button-row">
+                  <button id="addZoneBtn" class="button button--ghost button--small">Add Zone</button>
+                  <button id="addTourBtn" class="button button--ghost button--small">Add Tour</button>
+                </div>
+              </div>
+
+              <div id="locationEditor"></div>
+
+              <div class="panel__subsection">
+                <div class="panel__header">
+                  <div>
+                    <p class="panel__eyebrow">Tour Matrix</p>
+                    <h3>Per-location Tours</h3>
+                  </div>
+                </div>
+                <div id="tourMatrix" class="table-wrap"></div>
+              </div>
+            </section>
+
+            <section class="panel panel--wide">
+              <div class="panel__header">
+                <div>
+                  <p class="panel__eyebrow">Map Editor</p>
+                  <h2>Satellite Zone Builder</h2>
+                </div>
+                <div class="button-row">
+                  <label class="button button--ghost button--small">
+                    Overlay KML
+                    <input id="kmlInput" type="file" accept=".kml,.xml" hidden />
+                  </label>
+                  <button id="clearKmlBtn" class="button button--ghost button--small">Clear KML</button>
+                </div>
+              </div>
+              <div class="map-layout">
+                <div>
+                  <div id="editorMap" class="editor-map"></div>
+                  <p class="map-note">
+                    Draw rectangles with the map controls. Up to 10 zones are allowed per location.
+                    Rectangle clicks show which tours currently use that zone.
+                  </p>
+                </div>
+                <aside class="map-sidebar">
+                  <div id="zoneInspector"></div>
+                  <div class="panel__subsection">
+                    <div class="panel__header">
+                      <div>
+                        <p class="panel__eyebrow">CSV Setup</p>
+                        <h3>Upload + Column Mapping</h3>
+                      </div>
+                      <div id="adminCsvMeta" class="panel__meta"></div>
+                    </div>
+                    <label id="csvDropZone" class="dropzone">
+                      <span class="dropzone__title">Drop Spidertracks CSV files here or click to browse</span>
+                      <span class="dropzone__body">
+                        Default mapping uses `Aircraft`, `DateTime(Local)`, `Latitude(decimal)`,
+                        `Longitude(decimal)`, and `Description`.
+                      </span>
+                    </label>
+                    <div id="mappingPanel" class="mapping-grid"></div>
+                  </div>
+                  <div class="panel__subsection">
+                    <div class="panel__header">
+                      <div>
+                        <p class="panel__eyebrow">Config JSON</p>
+                        <h3>Backup / Advanced Edit</h3>
+                      </div>
+                      <div class="button-row">
+                        <button id="loadConfigToEditorBtn" class="button button--ghost button--small">
+                          Load Current
+                        </button>
+                        <button id="applyJsonBtn" class="button button--small button--small">
+                          Apply JSON
+                        </button>
+                      </div>
+                    </div>
+                    <textarea id="configEditor" class="config-editor" spellcheck="false"></textarea>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="tracker-core.js?v=20260404-routefix20"></script>
+    <script src="app.js?v=20260404-routefix20"></script>
+  </body>
+</html>

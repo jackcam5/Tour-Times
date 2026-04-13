@@ -21,8 +21,13 @@
   const WEATHER_HISTORY_MS = WEATHER_HISTORY_DAYS * 24 * 60 * 60 * 1000;
   const WEATHER_REQUEST_TIMEOUT_MS = 5500;
   const WEATHER_LOADING_FAILSAFE_MS = 6500;
+  const SHARED_STATE_REFRESH_MS = 30000;
   const LOADING_AUTO_HIDE_MS = 12000;
   const LOADING_SHOW_DELAY_MS = 700;
+  const GOAL_BUFFER_MINUTES =
+    typeof globalObject.TourTrackerCore.GOAL_BUFFER_MINUTES === "number"
+      ? globalObject.TourTrackerCore.GOAL_BUFFER_MINUTES
+      : 0.5;
   const FLIGHT_REASON_OPTIONS = [
     "Photo Flight",
     "Maintenance",
@@ -67,7 +72,6 @@
     flightsMeta: document.getElementById("flightsMeta"),
     flightSearchInput: document.getElementById("flightSearchInput"),
     flightDetail: document.getElementById("flightDetail"),
-    flightMapOverlay: document.getElementById("flightMapOverlay"),
     flightMapMessage: document.getElementById("flightMapMessage"),
     loadingOverlay: document.getElementById("loadingOverlay"),
     loadingMessage: document.getElementById("loadingMessage"),
@@ -114,6 +118,8 @@
     flightAnnotations: loadStoredFlightAnnotations(),
     loading: false,
     loadingMessage: "Loading...",
+    lastSharedPublishedAt: "",
+    pendingFlightDetailRefresh: false,
   };
 
   const maps = {
@@ -129,6 +135,7 @@
 
   let loadingTimerId = 0;
   let loadingShowTimerId = 0;
+  let sharedRefreshTimerId = 0;
 
   if (document.body) {
     document.body.classList.add("mode-" + APP_MODE);
@@ -473,6 +480,45 @@
     return state.flightAnnotations[flight.stableKey] || null;
   }
 
+  function flightWithinGoalBuffer(flight) {
+    return Boolean(
+      flight &&
+        flight.assigned &&
+        flight.bestEvaluation &&
+        flight.durationMinutes <= flight.bestEvaluation.goalMinutes + GOAL_BUFFER_MINUTES
+    );
+  }
+
+  function isEditingFlightAnnotation() {
+    const active = document.activeElement;
+    return Boolean(
+      active &&
+        (active.id === "flightReasonSelect" ||
+          active.id === "flightReasonNote" ||
+          active.closest("[data-flight-annotation-editor]"))
+    );
+  }
+
+  function refreshSelectedFlightDetail(options) {
+    const settings = options || {};
+    const selected = currentFlight();
+    if (!selected || state.activeTab !== "flights") {
+      return;
+    }
+    if (settings.flightId && selected.id !== settings.flightId) {
+      return;
+    }
+    if (!settings.force && isEditingFlightAnnotation()) {
+      state.pendingFlightDetailRefresh = true;
+      return;
+    }
+    state.pendingFlightDetailRefresh = false;
+    renderFlightDetail();
+    if (settings.includeMap) {
+      renderFlightMap();
+    }
+  }
+
   function truncateText(value, maxLength) {
     const text = blank(value).trim();
     if (!text || text.length <= maxLength) {
@@ -586,6 +632,68 @@
       });
   }
 
+  function applySharedState(sharedState, options) {
+    const settings = options || {};
+    if (!sharedState) {
+      return false;
+    }
+
+    const sharedPublishedAt = blank(sharedState.publishedAt).trim();
+    const hasPublishedPayload = Boolean(sharedState.hasConfig || sharedState.hasCsv);
+    const shouldApply =
+      settings.force ||
+      (hasPublishedPayload &&
+        (sharedPublishedAt !== state.lastSharedPublishedAt ||
+          (!state.csvText.trim() && blank(sharedState.csvText).trim())));
+
+    state.lastSharedPublishedAt = sharedPublishedAt;
+
+    if (!shouldApply) {
+      return false;
+    }
+
+    if (sharedState.config) {
+      state.config = core.sanitizeConfig(sharedState.config);
+      seedMissingWeatherStations(state.config);
+      saveConfig();
+    }
+
+    state.flightAnnotations = sanitizeFlightAnnotations(sharedState.flightAnnotations || {});
+    saveFlightAnnotations();
+
+    const sharedCsv = blank(sharedState.csvText);
+    if (sharedCsv.trim()) {
+      handleCsvText(sharedCsv);
+      return true;
+    }
+
+    state.csvText = "";
+    state.headers = [];
+    state.rowObjects = [];
+    state.analysis = null;
+    state.selectedFlightId = "";
+    state.flightSearchQuery = "";
+    state.weatherByFlightId = {};
+    clearStoredCsv();
+    render();
+    return true;
+  }
+
+  function startSharedStateRefresh() {
+    if (sharedRefreshTimerId) {
+      globalObject.clearInterval(sharedRefreshTimerId);
+      sharedRefreshTimerId = 0;
+    }
+    if (APP_MODE !== "public" || !canUseServerApi()) {
+      return;
+    }
+    sharedRefreshTimerId = globalObject.setInterval(function refreshSharedState() {
+      loadSharedState().then(function onSharedState(sharedState) {
+        applySharedState(sharedState);
+      });
+    }, SHARED_STATE_REFRESH_MS);
+  }
+
   function publishSharedState() {
     if (!canUseServerApi()) {
       setStatus("error", "Publishing requires running the local Ruby server.");
@@ -665,8 +773,7 @@
         },
         error: "",
       };
-      renderFlightDetail();
-      renderFlightMap();
+      refreshSelectedFlightDetail({ flightId: flight.id });
       return;
     }
     const current = flightWeatherState(flight.id);
@@ -679,13 +786,11 @@
         data: null,
         error: "Weather requires running the app from the local Ruby server, not file://.",
       };
-      renderFlightDetail();
-      renderFlightMap();
+      refreshSelectedFlightDetail({ flightId: flight.id });
       return;
     }
 
     state.weatherByFlightId[flight.id] = { status: "loading", data: null, error: "" };
-    renderFlightDetail();
 
     globalObject.setTimeout(function weatherFailsafe() {
       const latest = flightWeatherState(flight.id);
@@ -695,8 +800,7 @@
           data: null,
           error: "Weather lookup timed out.",
         };
-        renderFlightDetail();
-        renderFlightMap();
+        refreshSelectedFlightDetail({ flightId: flight.id });
       }
     }, WEATHER_LOADING_FAILSAFE_MS);
 
@@ -714,8 +818,7 @@
     fetchJsonWithTimeout(url, {}, WEATHER_REQUEST_TIMEOUT_MS)
       .then(function onPayload(payload) {
         state.weatherByFlightId[flight.id] = { status: "loaded", data: payload, error: "" };
-        renderFlightDetail();
-        renderFlightMap();
+        refreshSelectedFlightDetail({ flightId: flight.id });
       })
       .catch(function onError(error) {
         const message =
@@ -727,8 +830,7 @@
           data: null,
           error: message,
         };
-        renderFlightDetail();
-        renderFlightMap();
+        refreshSelectedFlightDetail({ flightId: flight.id });
       });
   }
 
@@ -890,13 +992,25 @@
     if (maps.flight && state.activeTab === "flights") {
       maps.flight.invalidateSize(true);
       if (maps.lastFlightBounds) {
-        globalObject.setTimeout(function fitFlightAfterResize() {
-          if (maps.flight && maps.lastFlightBounds) {
-            maps.flight.fitBounds(maps.lastFlightBounds.pad(0.18), { animate: false });
-          }
-        }, 30);
+        scheduleFlightMapFit(maps.lastFlightBounds);
       }
     }
+  }
+
+  function scheduleFlightMapFit(bounds) {
+    if (!maps.flight || !bounds || !bounds.isValid()) {
+      return;
+    }
+    maps.lastFlightBounds = bounds;
+    [0, 80, 220].forEach(function eachDelay(delay) {
+      globalObject.setTimeout(function fitFlightBounds() {
+        if (!maps.flight || !maps.lastFlightBounds || state.activeTab !== "flights") {
+          return;
+        }
+        maps.flight.invalidateSize(true);
+        maps.flight.fitBounds(maps.lastFlightBounds.pad(0.18), { animate: false });
+      }, delay);
+    });
   }
 
   function fitEditorToUsefulBounds() {
@@ -1083,6 +1197,7 @@
 
     if (state.activeTab === "flights") {
       renderFlights();
+      loadWeatherForFlight(currentFlight());
       renderFlightDetail();
       renderFlightMap();
     }
@@ -1286,10 +1401,8 @@
                 "</td></tr>"
               );
             })
-            .join("") +
-          "</tbody><tfoot><tr><td>Total</td><td>" +
-          escapeHtml(core.formatDuration(3)) +
-          "</td><td>" +
+          .join("") +
+          "</tbody><tfoot><tr><td>Total</td><td></td><td>" +
           escapeHtml(
             location.avgLoadMinutes == null ? "No Data" : core.formatDuration(location.avgLoadMinutes)
           ) +
@@ -1329,10 +1442,10 @@
     });
 
     const goodFlights = flights.filter(function isGood(flight) {
-      return flight.assigned && flight.durationMinutes <= flight.bestEvaluation.goalMinutes;
+      return flightWithinGoalBuffer(flight);
     });
     const badFlights = flights.filter(function isBad(flight) {
-      return !flight.assigned || flight.durationMinutes > flight.bestEvaluation.goalMinutes;
+      return !flight.assigned || !flightWithinGoalBuffer(flight);
     });
 
     const tourButtons = locationSummary.rows
@@ -1417,7 +1530,7 @@
     if (!flight.bestEvaluation) {
       return "<span class='pill pill--muted'>Unassigned</span>";
     }
-    if (flight.assigned && flight.durationMinutes <= flight.bestEvaluation.goalMinutes) {
+    if (flightWithinGoalBuffer(flight)) {
       return "<span class='pill pill--good'>On Plan</span>";
     }
     if (flight.assigned) {
@@ -1566,7 +1679,6 @@
       return;
     }
 
-    loadWeatherForFlight(flight);
     const weather = flightWeatherState(flight.id);
     const annotation = currentFlightAnnotation(flight);
 
@@ -2078,10 +2190,6 @@
       elements.flightMapMessage.hidden = true;
       elements.flightMapMessage.innerHTML = "";
     }
-    if (elements.flightMapOverlay) {
-      elements.flightMapOverlay.hidden = true;
-      elements.flightMapOverlay.innerHTML = "";
-    }
     const flight = currentFlight();
     if (!flight) {
       if (elements.flightMapMessage) {
@@ -2095,6 +2203,8 @@
 
     const latLngs = flight.points.map(function eachPoint(point) {
       return [point.latitude, point.longitude];
+    }).filter(function keepLatLng(latLng) {
+      return Number.isFinite(latLng[0]) && Number.isFinite(latLng[1]);
     });
     if (latLngs.length < 2) {
       if (elements.flightMapMessage) {
@@ -2175,14 +2285,7 @@
       for (let index = 1; index < focusBounds.length; index += 1) {
         combined.extend(focusBounds[index]);
       }
-      maps.lastFlightBounds = combined;
-      maps.flight.fitBounds(combined.pad(0.18), { animate: false });
-      globalObject.setTimeout(function refitFlightMap() {
-        if (maps.flight && maps.lastFlightBounds) {
-          maps.flight.invalidateSize(true);
-          maps.flight.fitBounds(maps.lastFlightBounds.pad(0.18), { animate: false });
-        }
-      }, 80);
+      scheduleFlightMapFit(combined);
     } else {
       maps.flight.setView([39.5, -84], 5, { animate: false });
     }
@@ -2416,6 +2519,7 @@
     }
     state.selectedFlightId = row.getAttribute("data-flight-id");
     renderFlights();
+    loadWeatherForFlight(currentFlight());
     renderFlightDetail();
     renderFlightMap();
   });
@@ -2434,6 +2538,14 @@
     if (event.target.id === "clearFlightAnnotationBtn") {
       saveFlightAnnotationForSelectedFlight("", "");
     }
+  });
+
+  elements.flightDetail.addEventListener("focusout", function onFlightDetailFocusOut() {
+    globalObject.setTimeout(function onBlurSettled() {
+      if (state.pendingFlightDetailRefresh && !isEditingFlightAnnotation()) {
+        refreshSelectedFlightDetail({ force: true });
+      }
+    }, 0);
   });
 
   elements.dashboardCards.addEventListener("click", function onDashboardClick(event) {
@@ -2847,27 +2959,24 @@
       if (localConfig) {
         state.config = core.sanitizeConfig(localConfig);
       }
-      if (sharedState && sharedState.config) {
-        state.config = core.sanitizeConfig(sharedState.config);
-      }
       seedMissingWeatherStations(state.config);
       state.flightAnnotations = localFlightAnnotations;
-      if (sharedState && sharedState.flightAnnotations) {
-        state.flightAnnotations = sanitizeFlightAnnotations(sharedState.flightAnnotations);
-      }
       saveFlightAnnotations();
 
-      const sharedCsv = sharedState ? blank(sharedState.csvText) : "";
+      if (applySharedState(sharedState, { force: Boolean(sharedState && (sharedState.hasConfig || sharedState.hasCsv)) })) {
+        return;
+      }
+
       const savedCsv = loadSessionCsv();
       const persistentCsv = loadPersistentCsv();
-      const csvToLoad = sharedCsv.trim() ? sharedCsv : persistentCsv.trim() ? persistentCsv : savedCsv;
+      const csvToLoad = persistentCsv.trim() ? persistentCsv : savedCsv;
 
       if (csvToLoad.trim()) {
         handleCsvText(csvToLoad);
         return;
       }
 
-      if (localConfig || (sharedState && sharedState.config)) {
+      if (localConfig) {
         syncAnalysis();
       } else {
         render();
@@ -2875,5 +2984,6 @@
     })
     .finally(function onReady() {
       setLoading(false);
+      startSharedStateRefresh();
     });
 })(typeof globalThis !== "undefined" ? globalThis : window);

@@ -1,5 +1,6 @@
 (function attachTrackerCore(globalObject) {
   const VALID_DATE_ORDERS = new Set(["auto", "DMY", "MDY", "YMD"]);
+  const GOAL_BUFFER_MINUTES = 0.5;
 
   const SAMPLE_CSV = [
     '"Aircraft","Track","Point","DateTime(UTC)","DateTime(Local)","Latitude(decimal)","Longitude(decimal)","Description"',
@@ -675,6 +676,7 @@
       const withinMax = !tour.maxMinutes || flight.durationMinutes <= tour.maxMinutes;
       const withinDurationWindow = withinMin && withinMax;
       const diffFromGoal = flight.durationMinutes - tour.goalMinutes;
+      const withinGoalBuffer = flight.durationMinutes <= tour.goalMinutes + GOAL_BUFFER_MINUTES;
       const matchScore =
         matchedZones.length * 100 +
         (allZonesHit ? 400 : 0) +
@@ -697,6 +699,7 @@
         goalMinutes: tour.goalMinutes,
         diffFromGoal: diffFromGoal,
         diffLabel: formatDuration(diffFromGoal),
+        withinGoalBuffer: withinGoalBuffer,
         matchScore: matchScore,
       };
     });
@@ -724,9 +727,9 @@
     flight.status = !bestEvaluation
       ? "Unassigned"
       : bestEvaluation.assigned
-        ? flight.durationMinutes > bestEvaluation.goalMinutes
-          ? "Over Goal"
-          : "On Plan"
+        ? bestEvaluation.withinGoalBuffer
+          ? "On Plan"
+          : "Over Goal"
         : bestEvaluation.allZonesHit
           ? "Outside Duration"
           : "Unassigned";
@@ -866,6 +869,7 @@
 
   const api = {
     DEFAULT_CONFIG: sanitizeConfig(DEFAULT_CONFIG),
+    GOAL_BUFFER_MINUTES: GOAL_BUFFER_MINUTES,
     SAMPLE_CSV: SAMPLE_CSV,
     analyzeRows: analyzeRows,
     deepClone: deepClone,

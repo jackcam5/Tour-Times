@@ -748,16 +748,7 @@ textarea {
 }
 
 .map-overlay-card {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  width: min(420px, calc(100% - 28px));
-  border-radius: 16px;
-  background: rgba(16, 19, 26, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(14px);
-  z-index: 500;
+  display: none !important;
 }
 
 .map-empty-state[hidden],

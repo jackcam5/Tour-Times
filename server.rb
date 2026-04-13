@@ -301,7 +301,7 @@ module WeatherHelpers
         <body>
           <main class="login-shell">
             <div class="brand-lockup">
-              <img src="/assets/mytourtimes-logo.png" alt="MyTourTimes" class="brand-logo" />
+              <img src="/assets/mytourtimes-logo.png?v=20260413-routefix21" alt="MyTourTimes" class="brand-logo" />
               <div class="brand-wordmark">
                 <p class="brand-wordmark__eyebrow">MyFlight</p>
                 <h1>Tour Times</h1>

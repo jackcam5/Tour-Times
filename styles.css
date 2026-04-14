@@ -602,6 +602,16 @@ textarea {
   font-weight: 800;
 }
 
+.mini-table__section td {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #b7c3d7;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .mini-table tbody tr.is-selected {
   background: rgba(59, 130, 246, 0.08);
 }
@@ -880,6 +890,13 @@ textarea {
   gap: 8px;
 }
 
+.route-set-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .tour-pill {
   border: 1px solid var(--line-strong);
   background: var(--panel-3);
@@ -998,6 +1015,7 @@ textarea {
 
 .tour-name-cell input,
 .time-cell input,
+.route-set-cell select,
 .check-cell input {
   width: auto;
 }

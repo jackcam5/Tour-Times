@@ -37,6 +37,7 @@
         shortName: "DETROIT",
         color: "#1d5fa7",
         weatherStations: ["KDET"],
+        routeSets: ["Normal", "TFR"],
         zones: [
           {
             id: "det-base",
@@ -64,6 +65,7 @@
         shortName: "SMOKY",
         color: "#377d22",
         weatherStations: ["KGKT"],
+        routeSets: ["Standard"],
         zones: [
           {
             id: "smoky-base",
@@ -98,6 +100,7 @@
         locationId: "detroit",
         name: "Quick Hop",
         tag: "",
+        routeSet: "Normal",
         minMinutes: 6,
         maxMinutes: 10,
         goalMinutes: 6.5,
@@ -109,6 +112,7 @@
         locationId: "detroit",
         name: "Downtown",
         tag: "",
+        routeSet: "Normal",
         minMinutes: 8.5,
         maxMinutes: 14,
         goalMinutes: 9,
@@ -120,6 +124,7 @@
         locationId: "smoky",
         name: "Intro",
         tag: "",
+        routeSet: "Standard",
         minMinutes: 0.75,
         maxMinutes: 2.7,
         goalMinutes: 1,
@@ -131,6 +136,7 @@
         locationId: "smoky",
         name: "Country Side",
         tag: "",
+        routeSet: "Standard",
         minMinutes: 4.8,
         maxMinutes: 6.5,
         goalMinutes: 5.5,
@@ -423,10 +429,21 @@
     };
   }
 
+  function defaultRouteSetsForLocationName(name) {
+    const key = blank(name).trim().toLowerCase();
+    if (key === "detroit") {
+      return ["Normal", "TFR"];
+    }
+    return ["Standard"];
+  }
+
   function sanitizeLocation(location, index) {
     const source = location || {};
     const color = blank(source.color) || "#1d5fa7";
     const zones = Array.isArray(source.zones) ? source.zones.slice(0, 10) : [];
+    const routeSetsSource = Array.isArray(source.routeSets)
+      ? source.routeSets
+      : blank(source.routeSets).split(",");
     const weatherStationsSource = Array.isArray(source.weatherStations)
       ? source.weatherStations
       : blank(source.weatherStations).split(/[,\s]+/);
@@ -435,6 +452,13 @@
       name: blank(source.name) || "Location " + (index + 1),
       shortName: blank(source.shortName) || blank(source.name || "Location").toUpperCase(),
       color,
+      routeSets: routeSetsSource
+        .map(function eachRouteSet(routeSet) { return blank(routeSet).trim(); })
+        .filter(Boolean)
+        .filter(function keepUnique(routeSet, routeSetIndex, list) {
+          return list.indexOf(routeSet) === routeSetIndex;
+        })
+        .slice(0, 6),
       weatherStations: weatherStationsSource
         .map(function eachStation(station) { return blank(station).trim().toUpperCase(); })
         .filter(Boolean)
@@ -452,6 +476,7 @@
       locationId: blank(source.locationId),
       name: blank(source.name) || "Tour " + (index + 1),
       tag: blank(source.tag),
+      routeSet: blank(source.routeSet).trim(),
       minMinutes: parseDurationToMinutes(source.minMinutes),
       maxMinutes: parseDurationToMinutes(source.maxMinutes),
       goalMinutes: parseDurationToMinutes(source.goalMinutes),
@@ -465,6 +490,27 @@
   function sanitizeConfig(config) {
     const source = config || {};
     const csvSettings = source.csvSettings || {};
+    const locations = Array.isArray(source.locations)
+      ? source.locations.map(sanitizeLocation)
+      : deepClone(DEFAULT_CONFIG.locations);
+    const locationRouteSetMap = new Map(
+      locations.map(function toEntry(location) {
+        const routeSets = location.routeSets && location.routeSets.length
+          ? location.routeSets.slice()
+          : defaultRouteSetsForLocationName(location.name);
+        location.routeSets = routeSets;
+        return [location.id, routeSets];
+      })
+    );
+    const tours = Array.isArray(source.tours)
+      ? source.tours.map(sanitizeTour).map(function normalizeRouteSet(tour) {
+          const routeSets = locationRouteSetMap.get(tour.locationId) || ["Standard"];
+          if (!tour.routeSet || routeSets.indexOf(tour.routeSet) === -1) {
+            tour.routeSet = routeSets[0];
+          }
+          return tour;
+        })
+      : deepClone(DEFAULT_CONFIG.tours);
     return {
       adminPassword: blank(source.adminPassword),
       csvSettings: {
@@ -476,12 +522,8 @@
         trackId: blank(csvSettings.trackId),
         dateOrder: VALID_DATE_ORDERS.has(csvSettings.dateOrder) ? csvSettings.dateOrder : "auto",
       },
-      locations: Array.isArray(source.locations)
-        ? source.locations.map(sanitizeLocation)
-        : deepClone(DEFAULT_CONFIG.locations),
-      tours: Array.isArray(source.tours)
-        ? source.tours.map(sanitizeTour)
-        : deepClone(DEFAULT_CONFIG.tours),
+      locations: locations,
+      tours: tours,
     };
   }
 
@@ -687,6 +729,7 @@
         tourId: tour.id,
         tourName: tour.name,
         tag: tour.tag,
+        routeSet: tour.routeSet,
         locationId: tour.locationId,
         locationName: location ? location.name : "",
         requiredZoneIds: requiredZoneIds,
@@ -773,6 +816,7 @@
         return {
           tourId: tour.id,
           name: tour.name,
+          routeSet: tour.routeSet,
           goalMinutes: tour.goalMinutes,
           avgMinutes: avgMinutes,
           diffMinutes: diffMinutes,
@@ -786,6 +830,9 @@
         name: location.name,
         shortName: location.shortName,
         color: location.color,
+        routeSets: location.routeSets && location.routeSets.length
+          ? location.routeSets.slice()
+          : ["Standard"],
         rows: rows,
         totalFlights: rows.reduce(function sum(total, row) { return total + row.count; }, 0),
         avgLoadMinutes: average(
@@ -842,11 +889,12 @@
   }
 
   function exportSummaryCsv(analysis) {
-    const lines = [["Location", "Tour", "Goal", "Actual", "Difference", "# Flights"]];
+    const lines = [["Location", "Route Set", "Tour", "Goal", "Actual", "Difference", "# Flights"]];
     analysis.summary.byLocation.forEach(function eachLocation(location) {
       location.rows.forEach(function eachRow(row) {
         lines.push([
           location.name,
+          row.routeSet || "",
           row.name,
           formatDuration(row.goalMinutes),
           row.avgMinutes == null ? "" : formatDuration(row.avgMinutes),

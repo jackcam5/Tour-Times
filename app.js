@@ -110,6 +110,7 @@
     selectedZoneId: "",
     selectedDashboardLocationId: "",
     selectedDashboardTourId: "",
+    selectedDashboardRouteSet: "",
     flightSearchQuery: "",
     adminUnlocked: APP_MODE === "admin",
     configEditorDirty: false,
@@ -535,6 +536,20 @@
       })
       .filter(Boolean)
       .slice(0, 8);
+  }
+
+  function parseRouteSetNames(value) {
+    const source = Array.isArray(value) ? value : blank(value).split(",");
+    const parsed = source
+      .map(function eachRouteSet(routeSet) {
+        return blank(routeSet).trim();
+      })
+      .filter(Boolean)
+      .filter(function keepUnique(routeSet, routeSetIndex, list) {
+        return list.indexOf(routeSet) === routeSetIndex;
+      })
+      .slice(0, 6);
+    return parsed.length ? parsed : ["Standard"];
   }
 
   function seedMissingWeatherStations(config) {
@@ -1338,47 +1353,48 @@
     );
   }
 
-  function renderDashboard() {
-    if (!state.analysis) {
-      elements.dashboardCards.innerHTML =
-        "<div class='empty-state'>The location dashboard appears after a CSV is loaded.</div>";
-      return;
+  function routeSetsForLocationSummary(locationSummary) {
+    if (!locationSummary) {
+      return [];
     }
-
-    if (
-      !state.analysis.summary.byLocation.some(function hasLocation(location) {
-        return location.locationId === state.selectedDashboardLocationId;
+    const configured = Array.isArray(locationSummary.routeSets)
+      ? locationSummary.routeSets.filter(Boolean)
+      : [];
+    const fromRows = locationSummary.rows
+      .map(function eachRow(row) {
+        return blank(row.routeSet).trim();
       })
-    ) {
-      state.selectedDashboardLocationId = state.analysis.summary.byLocation[0]
-        ? state.analysis.summary.byLocation[0].locationId
-        : "";
-      state.selectedDashboardTourId = "";
-    }
+      .filter(Boolean);
+    const ordered = configured.concat(fromRows).filter(function keepUnique(routeSet, index, list) {
+      return list.indexOf(routeSet) === index;
+    });
+    return ordered.length ? ordered : ["Standard"];
+  }
 
-    elements.dashboardCards.innerHTML = state.analysis.summary.byLocation
-      .map(function eachLocation(location) {
+  function renderDashboardLocationRows(location) {
+    const routeSets = routeSetsForLocationSummary(location);
+    const showSections = routeSets.length > 1;
+    return routeSets
+      .map(function eachRouteSet(routeSet) {
+        const rows = location.rows.filter(function matchesRouteSet(row) {
+          return blank(row.routeSet).trim() === routeSet;
+        });
+        if (!rows.length) {
+          return "";
+        }
         return (
-          "<article class='location-card" +
-          (location.locationId === state.selectedDashboardLocationId ? " is-selected" : "") +
-          "' data-dashboard-location='" +
-          escapeHtml(location.locationId) +
-          "'>" +
-          "<div class='location-card__head' style='background:" +
-          escapeHtml(location.color) +
-          "'><h3>" +
-          escapeHtml(location.name) +
-          "</h3><div class='location-card__meta'>" +
-          escapeHtml(String(location.totalFlights)) +
-          "</div></div>" +
-          "<table class='mini-table'><thead><tr><th>Tours</th><th>Time Goal</th><th>Actual</th><th>Difference</th><th>#</th></tr></thead><tbody>" +
-          location.rows
+          (showSections
+            ? "<tr class='mini-table__section'><td colspan='5'>" + escapeHtml(routeSet) + "</td></tr>"
+            : "") +
+          rows
             .map(function eachRow(row) {
               return (
                 "<tr data-dashboard-location='" +
                 escapeHtml(location.locationId) +
                 "' data-dashboard-tour='" +
                 escapeHtml(row.tourId) +
+                "' data-dashboard-route-set='" +
+                escapeHtml(routeSet) +
                 "'" +
                 (row.tourId === state.selectedDashboardTourId &&
                 location.locationId === state.selectedDashboardLocationId
@@ -1401,7 +1417,58 @@
                 "</td></tr>"
               );
             })
-          .join("") +
+            .join("")
+        );
+      })
+      .join("");
+  }
+
+  function renderDashboard() {
+    if (!state.analysis) {
+      elements.dashboardCards.innerHTML =
+        "<div class='empty-state'>The location dashboard appears after a CSV is loaded.</div>";
+      return;
+    }
+
+    if (
+      !state.analysis.summary.byLocation.some(function hasLocation(location) {
+        return location.locationId === state.selectedDashboardLocationId;
+      })
+    ) {
+      state.selectedDashboardLocationId = state.analysis.summary.byLocation[0]
+        ? state.analysis.summary.byLocation[0].locationId
+        : "";
+      state.selectedDashboardTourId = "";
+      state.selectedDashboardRouteSet = "";
+    }
+
+    const selectedLocationSummary = state.analysis.summary.byLocation.find(function findLocation(location) {
+      return location.locationId === state.selectedDashboardLocationId;
+    });
+    if (
+      state.selectedDashboardRouteSet &&
+      routeSetsForLocationSummary(selectedLocationSummary).indexOf(state.selectedDashboardRouteSet) === -1
+    ) {
+      state.selectedDashboardRouteSet = "";
+    }
+
+    elements.dashboardCards.innerHTML = state.analysis.summary.byLocation
+      .map(function eachLocation(location) {
+        return (
+          "<article class='location-card" +
+          (location.locationId === state.selectedDashboardLocationId ? " is-selected" : "") +
+          "' data-dashboard-location='" +
+          escapeHtml(location.locationId) +
+          "'>" +
+          "<div class='location-card__head' style='background:" +
+          escapeHtml(location.color) +
+          "'><h3>" +
+          escapeHtml(location.name) +
+          "</h3><div class='location-card__meta'>" +
+          escapeHtml(String(location.totalFlights)) +
+          "</div></div>" +
+          "<table class='mini-table'><thead><tr><th>Tours</th><th>Time Goal</th><th>Actual</th><th>Difference</th><th>#</th></tr></thead><tbody>" +
+          renderDashboardLocationRows(location) +
           "</tbody><tfoot><tr><td>Total</td><td></td><td>" +
           escapeHtml(
             location.avgLoadMinutes == null ? "No Data" : core.formatDuration(location.avgLoadMinutes)
@@ -1431,8 +1498,31 @@
       return;
     }
 
+    const routeSets = routeSetsForLocationSummary(locationSummary);
+    if (state.selectedDashboardRouteSet && routeSets.indexOf(state.selectedDashboardRouteSet) === -1) {
+      state.selectedDashboardRouteSet = "";
+    }
+    if (
+      state.selectedDashboardTourId &&
+      !locationSummary.rows.some(function hasTour(row) {
+        return (
+          row.tourId === state.selectedDashboardTourId &&
+          (!state.selectedDashboardRouteSet ||
+            blank(row.routeSet).trim() === state.selectedDashboardRouteSet)
+        );
+      })
+    ) {
+      state.selectedDashboardTourId = "";
+    }
+
     const flights = state.analysis.flights.filter(function filterFlight(flight) {
       if (flight.locationId !== locationSummary.locationId) {
+        return false;
+      }
+      if (
+        state.selectedDashboardRouteSet &&
+        (!flight.bestEvaluation || blank(flight.bestEvaluation.routeSet).trim() !== state.selectedDashboardRouteSet)
+      ) {
         return false;
       }
       if (!state.selectedDashboardTourId) {
@@ -1449,6 +1539,12 @@
     });
 
     const tourButtons = locationSummary.rows
+      .filter(function filterByRouteSet(row) {
+        if (!state.selectedDashboardRouteSet) {
+          return true;
+        }
+        return blank(row.routeSet).trim() === state.selectedDashboardRouteSet;
+      })
       .map(function eachRow(row) {
         const isActive = row.tourId === state.selectedDashboardTourId;
         return (
@@ -1458,6 +1554,8 @@
           escapeHtml(locationSummary.locationId) +
           "' data-dashboard-tour='" +
           escapeHtml(row.tourId) +
+          "' data-dashboard-route-set='" +
+          escapeHtml(blank(row.routeSet).trim()) +
           "'>" +
           escapeHtml(row.name) +
           " <span>" +
@@ -1467,6 +1565,30 @@
       })
       .join("");
 
+    const routeSetButtons = routeSets.length > 1
+      ? "<div class='route-set-pill-row'><button class='tour-pill" +
+        (state.selectedDashboardRouteSet ? "" : " is-active") +
+        "' data-dashboard-location='" +
+        escapeHtml(locationSummary.locationId) +
+        "' data-dashboard-route-set=''>All Route Sets</button>" +
+        routeSets
+          .map(function eachRouteSet(routeSet) {
+            return (
+              "<button class='tour-pill" +
+              (routeSet === state.selectedDashboardRouteSet ? " is-active" : "") +
+              "' data-dashboard-location='" +
+              escapeHtml(locationSummary.locationId) +
+              "' data-dashboard-route-set='" +
+              escapeHtml(routeSet) +
+              "'>" +
+              escapeHtml(routeSet) +
+              "</button>"
+            );
+          })
+          .join("") +
+        "</div>"
+      : "";
+
     elements.dashboardDetail.innerHTML =
       "<div class='dashboard-detail-grid'><div class='detail-card'><div class='panel__header'><div><h3>" +
       escapeHtml(locationSummary.name) +
@@ -1474,13 +1596,17 @@
       escapeHtml(String(goodFlights.length)) +
       " good</span><span class='pill pill--bad'>" +
       escapeHtml(String(badFlights.length)) +
-      " bad</span></div></div><div class='tour-pill-row'><button class='tour-pill" +
+      " bad</span></div></div>" +
+      routeSetButtons +
+      "<div class='tour-pill-row'><button class='tour-pill" +
       (state.selectedDashboardTourId ? "" : " is-active") +
       "' data-dashboard-location='" +
       escapeHtml(locationSummary.locationId) +
-      "' data-dashboard-tour=''>All Tours</button>" +
+      "' data-dashboard-tour='' data-dashboard-route-set='" +
+      escapeHtml(state.selectedDashboardRouteSet) +
+      "'>All Tours</button>" +
       tourButtons +
-      "</div></div><div class='detail-card'><div class='panel__header'><div><h3>Good Flights</h3></div></div>" +
+      "</div></div></div><div class='detail-card'><div class='panel__header'><div><h3>Good Flights</h3></div></div>" +
       renderDashboardFlightList(goodFlights, "No good flights matched this filter.") +
       "</div><div class='detail-card'><div class='panel__header'><div><h3>Needs Review</h3></div></div>" +
       renderDashboardFlightList(badFlights, "No flights need review for this filter.") +
@@ -1554,7 +1680,11 @@
   function renderMatchedTourCell(flight) {
     const evaluation = flight.bestEvaluation;
     const tourName = evaluation && evaluation.assigned ? evaluation.tourName : "No match";
-    return "<div class='matched-tour-cell'><span>" + escapeHtml(tourName) + "</span></div>";
+    const routeSet =
+      evaluation && evaluation.assigned && blank(evaluation.routeSet).trim()
+        ? "<span class='pill pill--tag'>" + escapeHtml(blank(evaluation.routeSet).trim()) + "</span>"
+        : "";
+    return "<div class='matched-tour-cell'><span>" + escapeHtml(tourName) + "</span>" + routeSet + "</div>";
   }
 
   function renderFlightReasonCell(flight) {
@@ -1660,6 +1790,7 @@
       flight.durationLabel,
       flight.locationName,
       flight.bestEvaluation ? flight.bestEvaluation.tourName : "No match",
+      flight.bestEvaluation ? flight.bestEvaluation.routeSet : "",
       currentFlightAnnotation(flight) ? currentFlightAnnotation(flight).reason : "",
       currentFlightAnnotation(flight) ? currentFlightAnnotation(flight).note : "",
       flight.status,
@@ -1989,6 +2120,8 @@
       escapeHtml(location.name) +
       "' /></label><label class='field'><span>Short label</span><input data-location-field='shortName' type='text' value='" +
       escapeHtml(location.shortName) +
+      "' /></label><label class='field'><span>Route sets (comma-separated)</span><input data-location-field='routeSets' type='text' placeholder='Normal, TFR' value='" +
+      escapeHtml((location.routeSets || []).join(", ")) +
       "' /></label><label class='field'><span>METAR stations (comma-separated)</span><input data-location-field='weatherStations' type='text' placeholder='KDET, KDTW' value='" +
       escapeHtml((location.weatherStations || []).join(", ")) +
       "' /></label><label class='field'><span>Theme color</span><input data-location-field='color' type='color' value='" +
@@ -2006,6 +2139,7 @@
     }
 
     const tours = locationTours(location.id);
+    const routeSetOptions = parseRouteSetNames(location.routeSets);
     const rows = tours
       .map(function eachTour(tour) {
         return (
@@ -2013,7 +2147,21 @@
           escapeHtml(tour.id) +
           "'><td class='tour-name-cell'><input data-tour-field='name' type='text' value='" +
           escapeHtml(tour.name) +
-          "' /></td><td class='time-cell'><input data-tour-field='minMinutes' type='text' value='" +
+          "' /></td><td class='route-set-cell'><select data-tour-field='routeSet'>" +
+          routeSetOptions
+            .map(function eachRouteSet(routeSet) {
+              return (
+                "<option value='" +
+                escapeHtml(routeSet) +
+                "'" +
+                (routeSet === blank(tour.routeSet).trim() ? " selected" : "") +
+                ">" +
+                escapeHtml(routeSet) +
+                "</option>"
+              );
+            })
+            .join("") +
+          "</select></td><td class='time-cell'><input data-tour-field='minMinutes' type='text' value='" +
           escapeHtml(core.formatDuration(tour.minMinutes)) +
           "' /></td><td class='time-cell'><input data-tour-field='maxMinutes' type='text' value='" +
           escapeHtml(core.formatDuration(tour.maxMinutes)) +
@@ -2049,7 +2197,7 @@
       .join("");
 
     elements.tourMatrix.innerHTML =
-      "<table class='table tour-matrix-table'><thead><tr><th>Tour</th><th>Min Time</th><th>Max Time</th><th>Goal Time</th><th>Zones</th><th></th></tr></thead><tbody>" +
+      "<table class='table tour-matrix-table'><thead><tr><th>Tour</th><th>Route Set</th><th>Min Time</th><th>Max Time</th><th>Goal Time</th><th>Zones</th><th></th></tr></thead><tbody>" +
       rows +
       "</tbody></table>";
   }
@@ -2422,6 +2570,7 @@
       .map(function eachLocation(location) {
         const lines = location.rows.map(function eachRow(row) {
           return (
+            (blank(row.routeSet).trim() ? "[" + blank(row.routeSet).trim() + "] " : "") +
             row.name +
             ": goal " +
             core.formatDuration(row.goalMinutes) +
@@ -2555,7 +2704,9 @@
     }
     state.selectedDashboardLocationId = locationTarget.getAttribute("data-dashboard-location");
     const tourId = locationTarget.getAttribute("data-dashboard-tour");
+    const routeSet = locationTarget.getAttribute("data-dashboard-route-set");
     state.selectedDashboardTourId = tourId != null ? tourId : "";
+    state.selectedDashboardRouteSet = routeSet != null ? routeSet : "";
     renderDashboard();
     renderDashboardDetail();
   });
@@ -2565,6 +2716,7 @@
     if (filterTarget) {
       state.selectedDashboardLocationId = filterTarget.getAttribute("data-dashboard-location");
       state.selectedDashboardTourId = filterTarget.getAttribute("data-dashboard-tour") || "";
+      state.selectedDashboardRouteSet = filterTarget.getAttribute("data-dashboard-route-set") || "";
       renderDashboard();
       renderDashboardDetail();
       return;
@@ -2668,6 +2820,7 @@
       name: "New Location",
       shortName: "NEW",
       color: "#4c6ef5",
+      routeSets: ["Standard"],
       weatherStations: [],
       zones: [],
     };
@@ -2715,6 +2868,7 @@
       locationId: location.id,
       name: "New Tour",
       tag: "",
+      routeSet: parseRouteSetNames(location.routeSets)[0],
       minMinutes: 0,
       maxMinutes: 0,
       goalMinutes: 0,
@@ -2739,6 +2893,10 @@
     const locationField = event.target.getAttribute("data-location-field");
     if (locationField) {
       updateLocation(location.id, function apply(locationToEdit) {
+        if (locationField === "routeSets") {
+          locationToEdit.routeSets = parseRouteSetNames(event.target.value);
+          return;
+        }
         if (locationField === "weatherStations") {
           locationToEdit.weatherStations = parseStationIdentifiers(event.target.value);
           return;
@@ -2832,6 +2990,9 @@
       }
       if (field === "name") {
         tour.name = event.target.value;
+      }
+      if (field === "routeSet") {
+        tour.routeSet = event.target.value;
       }
       if (field === "tag") {
         tour.tag = event.target.value;

@@ -63,7 +63,7 @@ body {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(340px, 1fr) minmax(420px, auto);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 22px;
   align-items: center;
   padding: 24px 26px;
@@ -72,24 +72,30 @@ body {
 }
 
 .brand-lockup {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
+  gap: 22px;
   min-width: 0;
 }
 
-.brand-logo {
+.brand-mark {
   display: block;
-  width: min(260px, 32vw);
-  max-width: 100%;
+  width: clamp(180px, 20vw, 280px);
+  color: #f7f9fc;
+  flex: 0 0 auto;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
   height: auto;
-  object-fit: contain;
   filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.2));
 }
 
 .brand-wordmark {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -108,13 +114,20 @@ body {
 
 .brand-wordmark h1 {
   margin: 0;
-  font-size: clamp(2rem, 3.6vw, 3.35rem);
-  line-height: 0.95;
+  display: grid;
+  gap: 0.02em;
+  font-size: clamp(1.85rem, 3vw, 3rem);
+  line-height: 0.88;
   color: #f6f8fb;
   font-weight: 800;
   font-style: italic;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.045em;
   text-transform: uppercase;
+  text-shadow: 0 10px 18px rgba(0, 0, 0, 0.18);
+}
+
+.brand-wordmark h1 span {
+  display: block;
 }
 
 .brand-wordmark__subhead {
@@ -1202,10 +1215,11 @@ textarea {
 
   .brand-lockup {
     width: 100%;
+    grid-template-columns: 1fr;
   }
 
-  .brand-logo {
-    width: min(320px, 100%);
+  .brand-mark {
+    width: min(240px, 100%);
   }
 
   .toolbar,

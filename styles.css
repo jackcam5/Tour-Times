@@ -878,10 +878,25 @@ textarea {
   line-height: 1.5;
 }
 
+.map-note--compact {
+  margin-top: 12px;
+  font-size: 0.84rem;
+  color: #aab4c5;
+}
+
+.dashboard-detail-stack {
+  display: grid;
+  gap: 12px;
+}
+
 .dashboard-detail-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.detail-card--filters {
+  min-width: 0;
 }
 
 .tour-pill-row {

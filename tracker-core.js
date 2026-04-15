@@ -26,6 +26,7 @@
       timestamp: "DateTime(Local)",
       latitude: "Latitude(decimal)",
       longitude: "Longitude(decimal)",
+      altitude: "Altitude(ft)",
       description: "Description",
       trackId: "Track",
       dateOrder: "YMD",
@@ -275,6 +276,7 @@
       timestamp: pick(["datetime(local)", "local", "timestamp", "time", "date"]),
       latitude: pick(["latitude(decimal)", "lat decimal", "latitude"]),
       longitude: pick(["longitude(decimal)", "long decimal", "longitude"]),
+      altitude: pick(["altitude(ft)", "altitude", "alt ft"]),
       description: pick(["description", "event", "status"]),
       trackId: pick(["track", "trip", "flight"]),
     };
@@ -518,6 +520,7 @@
         timestamp: blank(csvSettings.timestamp),
         latitude: blank(csvSettings.latitude),
         longitude: blank(csvSettings.longitude),
+        altitude: blank(csvSettings.altitude),
         description: blank(csvSettings.description),
         trackId: blank(csvSettings.trackId),
         dateOrder: VALID_DATE_ORDERS.has(csvSettings.dateOrder) ? csvSettings.dateOrder : "auto",
@@ -537,6 +540,7 @@
         const timestamp = parseTimestamp(timestampText, csvSettings.dateOrder);
         const latitude = parseNumber(rowObject[csvSettings.latitude]);
         const longitude = parseNumber(rowObject[csvSettings.longitude]);
+        const altitudeFt = parseNumber(rowObject[csvSettings.altitude]);
         const tailNumber = blank(rowObject[csvSettings.tailNumber]).trim();
         const description = blank(rowObject[csvSettings.description]).trim();
         const trackId = blank(rowObject[csvSettings.trackId]).trim();
@@ -560,6 +564,7 @@
           wallClockMinutes: extractWallClockMinutes(timestampText, timestamp),
           latitude: latitude,
           longitude: longitude,
+          altitudeFt: altitudeFt,
           rawRow: rowObject,
         };
       })
@@ -644,6 +649,20 @@
             currentFlight.points.reduce(function sum(total, item) {
               return total + item.longitude;
             }, 0) / currentFlight.points.length;
+          const altitudePoints = currentFlight.points.filter(function withAltitude(item) {
+            return Number.isFinite(item.altitudeFt);
+          });
+          currentFlight.hasAltitude = altitudePoints.length >= 2;
+          currentFlight.minAltitudeFt = altitudePoints.length
+            ? altitudePoints.reduce(function minAltitude(lowest, item) {
+                return Math.min(lowest, item.altitudeFt);
+              }, altitudePoints[0].altitudeFt)
+            : null;
+          currentFlight.maxAltitudeFt = altitudePoints.length
+            ? altitudePoints.reduce(function maxAltitude(highest, item) {
+                return Math.max(highest, item.altitudeFt);
+              }, altitudePoints[0].altitudeFt)
+            : null;
           currentFlight.stableKey = makeFlightStableKey(currentFlight);
           flights.push(currentFlight);
           currentFlight = null;

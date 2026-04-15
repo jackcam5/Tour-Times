@@ -1126,7 +1126,7 @@
     const parsed = core.parseCsv(csvText);
     state.headers = parsed.headers;
     const inferred = core.inferMapping(parsed.headers);
-    ["tailNumber", "timestamp", "latitude", "longitude", "description", "trackId"].forEach(
+    ["tailNumber", "timestamp", "latitude", "longitude", "altitude", "description", "trackId"].forEach(
       function apply(key) {
         const current = state.config.csvSettings[key];
         if (!current || state.headers.indexOf(current) === -1) {
@@ -1297,6 +1297,7 @@
       renderSelectField("Local timestamp", "timestamp", options(settings.timestamp)) +
       renderSelectField("Latitude", "latitude", options(settings.latitude)) +
       renderSelectField("Longitude", "longitude", options(settings.longitude)) +
+      renderSelectField("Altitude", "altitude", options(settings.altitude)) +
       renderSelectField("Description", "description", options(settings.description)) +
       renderSelectField("Track ID", "trackId", options(settings.trackId)) +
       "<label class='field'><span>Date order fallback</span><select data-mapping='dateOrder'>" +
@@ -1519,10 +1520,7 @@
       if (flight.locationId !== locationSummary.locationId) {
         return false;
       }
-      if (
-        state.selectedDashboardRouteSet &&
-        (!flight.bestEvaluation || blank(flight.bestEvaluation.routeSet).trim() !== state.selectedDashboardRouteSet)
-      ) {
+      if (!flightMatchesSelectedRouteSet(flight)) {
         return false;
       }
       if (!state.selectedDashboardTourId) {
@@ -1536,6 +1534,21 @@
     });
     const badFlights = flights.filter(function isBad(flight) {
       return !flight.assigned || !flightWithinGoalBuffer(flight);
+    });
+    const operationalFlights = state.analysis.flights.filter(function filterOperationalFlight(flight) {
+      if (!currentFlightAnnotation(flight)) {
+        return false;
+      }
+      if (!flightTouchesLocation(flight, locationSummary.locationId)) {
+        return false;
+      }
+      if (!flightMatchesSelectedRouteSet(flight)) {
+        return false;
+      }
+      if (!state.selectedDashboardTourId) {
+        return true;
+      }
+      return !flight.bestEvaluation || flight.bestEvaluation.tourId === state.selectedDashboardTourId;
     });
 
     const tourButtons = locationSummary.rows
@@ -1590,13 +1603,15 @@
       : "";
 
     elements.dashboardDetail.innerHTML =
-      "<div class='dashboard-detail-grid'><div class='detail-card'><div class='panel__header'><div><h3>" +
+      "<div class='dashboard-detail-stack'><div class='detail-card detail-card--filters'><div class='panel__header'><div><h3>" +
       escapeHtml(locationSummary.name) +
       "</h3><p class='muted'>Click a tour to filter the flights listed for this location.</p></div><div class='card-header__meta'><span class='pill pill--good'>" +
       escapeHtml(String(goodFlights.length)) +
       " good</span><span class='pill pill--bad'>" +
       escapeHtml(String(badFlights.length)) +
-      " bad</span></div></div>" +
+      " bad</span><span class='pill pill--annotation'>" +
+      escapeHtml(String(operationalFlights.length)) +
+      " operational</span></div></div>" +
       routeSetButtons +
       "<div class='tour-pill-row'><button class='tour-pill" +
       (state.selectedDashboardTourId ? "" : " is-active") +
@@ -1606,11 +1621,16 @@
       escapeHtml(state.selectedDashboardRouteSet) +
       "'>All Tours</button>" +
       tourButtons +
-      "</div></div></div><div class='detail-card'><div class='panel__header'><div><h3>Good Flights</h3></div></div>" +
+      "</div></div><div class='dashboard-detail-grid'><div class='detail-card'><div class='panel__header'><div><h3>Good Flights</h3></div></div>" +
       renderDashboardFlightList(goodFlights, "No good flights matched this filter.") +
       "</div><div class='detail-card'><div class='panel__header'><div><h3>Needs Review</h3></div></div>" +
       renderDashboardFlightList(badFlights, "No flights need review for this filter.") +
-      "</div></div>";
+      "</div><div class='detail-card'><div class='panel__header'><div><h3>Operational Notes</h3><p class='muted'>Ferry, training, photo, maintenance, and other annotated flights.</p></div></div>" +
+      renderDashboardFlightList(
+        operationalFlights,
+        "No annotated operational flights are attached to this location yet."
+      ) +
+      "</div></div></div>";
   }
 
   function renderDashboardFlightList(flights, emptyMessage) {
@@ -1821,6 +1841,7 @@
       "</p></div><div class='card-header__meta'><span class='pill'>" +
       escapeHtml(flight.durationLabel) +
       "</span>" +
+      renderFlightAltitudePill(flight) +
       renderFlightReasonPill(annotation) +
       flightStatusPill(flight) +
       "</div></div><div>" +
@@ -2271,11 +2292,75 @@
       kmlMarkup;
   }
 
+  function routeSegmentColor(startPoint, endPoint, index, totalSegments, flight) {
+    const progress = totalSegments > 1 ? index / (totalSegments - 1) : 0;
+    if (flight && flight.hasAltitude && Number.isFinite(flight.minAltitudeFt) && Number.isFinite(flight.maxAltitudeFt)) {
+      const altitudeValues = [startPoint.altitudeFt, endPoint.altitudeFt].filter(function isFiniteAltitude(value) {
+        return Number.isFinite(value);
+      });
+      if (altitudeValues.length) {
+        const averageAltitude =
+          altitudeValues.reduce(function sum(total, value) { return total + value; }, 0) /
+          altitudeValues.length;
+        const range = Math.max(1, flight.maxAltitudeFt - flight.minAltitudeFt);
+        const altitudeRatio = Math.max(0, Math.min(1, (averageAltitude - flight.minAltitudeFt) / range));
+        const hue = 150 + progress * 190;
+        const lightness = 48 + altitudeRatio * 18;
+        return "hsl(" + hue.toFixed(0) + ", 90%, " + lightness.toFixed(0) + "%)";
+      }
+    }
+    const hue = 150 + progress * 190;
+    return "hsl(" + hue.toFixed(0) + ", 88%, 60%)";
+  }
+
+  function renderFlightAltitudePill(flight) {
+    if (
+      !flight ||
+      !flight.hasAltitude ||
+      !Number.isFinite(flight.minAltitudeFt) ||
+      !Number.isFinite(flight.maxAltitudeFt)
+    ) {
+      return "";
+    }
+    return (
+      "<span class='pill pill--muted'>" +
+      escapeHtml(
+        Math.round(flight.minAltitudeFt) +
+          "-" +
+          Math.round(flight.maxAltitudeFt) +
+          " ft"
+      ) +
+      "</span>"
+    );
+  }
+
   function renderConfigEditor(force) {
     if (state.configEditorDirty && !force) {
       return;
     }
     elements.configEditor.value = JSON.stringify(state.config, null, 2);
+  }
+
+  function flightTouchesLocation(flight, locationId) {
+    if (!flight || !locationId) {
+      return false;
+    }
+    if (flight.locationId === locationId) {
+      return true;
+    }
+    return flight.zoneHits.some(function eachHit(hit) {
+      return hit.locationId === locationId;
+    });
+  }
+
+  function flightMatchesSelectedRouteSet(flight) {
+    if (!state.selectedDashboardRouteSet) {
+      return true;
+    }
+    if (!flight || !flight.bestEvaluation) {
+      return true;
+    }
+    return blank(flight.bestEvaluation.routeSet).trim() === state.selectedDashboardRouteSet;
   }
 
   function renderEditorMap() {
@@ -2349,12 +2434,13 @@
       return;
     }
 
-    const latLngs = flight.points.map(function eachPoint(point) {
-      return [point.latitude, point.longitude];
-    }).filter(function keepLatLng(latLng) {
-      return Number.isFinite(latLng[0]) && Number.isFinite(latLng[1]);
+    const validPoints = flight.points.filter(function keepPoint(point) {
+      return Number.isFinite(point.latitude) && Number.isFinite(point.longitude);
     });
-    if (latLngs.length < 2) {
+    const latLngs = validPoints.map(function eachPoint(point) {
+      return [point.latitude, point.longitude];
+    });
+    if (validPoints.length < 2) {
       if (elements.flightMapMessage) {
         elements.flightMapMessage.hidden = false;
         elements.flightMapMessage.innerHTML =
@@ -2366,16 +2452,30 @@
     const focusBounds = [];
     const glow = L.polyline(latLngs, {
       color: "rgba(6, 10, 18, 0.9)",
-      weight: 8,
-      opacity: 0.9,
+      weight: 10,
+      opacity: 0.58,
       lineJoin: "round",
+      lineCap: "round",
     }).addTo(maps.flightGroup);
-    const path = L.polyline(latLngs, {
-      color: "#7dd3fc",
-      weight: 4,
-      opacity: 1,
-      lineJoin: "round",
-    }).addTo(maps.flightGroup);
+
+    for (let index = 0; index < validPoints.length - 1; index += 1) {
+      const startPoint = validPoints[index];
+      const endPoint = validPoints[index + 1];
+      L.polyline(
+        [
+          [startPoint.latitude, startPoint.longitude],
+          [endPoint.latitude, endPoint.longitude],
+        ],
+        {
+          color: routeSegmentColor(startPoint, endPoint, index, validPoints.length - 1, flight),
+          weight: 4.5,
+          opacity: 0.98,
+          lineJoin: "round",
+          lineCap: "round",
+        }
+      ).addTo(maps.flightGroup);
+    }
+
     L.circleMarker(latLngs[0], {
       radius: 7,
       color: "#062216",
@@ -2390,8 +2490,8 @@
       fillOpacity: 1,
       weight: 2,
     }).addTo(maps.flightGroup);
-    if (path.getBounds().isValid()) {
-      focusBounds.push(path.getBounds());
+    if (glow.getBounds().isValid()) {
+      focusBounds.push(glow.getBounds());
     }
 
     state.config.locations.forEach(function eachLocation(location) {

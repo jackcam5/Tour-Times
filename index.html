@@ -22,20 +22,12 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700;1,800&display=swap"
     />
-    <link rel="stylesheet" href="styles.css?v=20260414-routefix24" />
+    <link rel="stylesheet" href="styles.css?v=20260415-brandclean1" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 260 96" role="presentation" focusable="false">
-              <polygon points="12,14 202,14 222,32 46,32" fill="currentColor"></polygon>
-              <polygon points="12,30 154,30 168,48 12,48" fill="currentColor"></polygon>
-              <polygon points="12,46 176,46 192,64 12,64" fill="currentColor"></polygon>
-              <polygon points="130,56 214,56 230,74 146,74" fill="currentColor" opacity="0.96"></polygon>
-            </svg>
-          </div>
           <div class="brand-wordmark">
             <p class="brand-wordmark__eyebrow">MyFlight</p>
             <h1><span>Tour</span><span>Times</span></h1>
@@ -79,6 +71,7 @@
           <button id="adminTabButton" class="tab-button" data-tab="admin" data-admin-only>Admin Studio</button>
         </div>
         <div class="toolbar__group">
+          <div id="lastUpdatedLabel" class="last-updated"></div>
           <div id="dateRangeLabel" class="date-range"></div>
         </div>
       </section>
@@ -88,11 +81,12 @@
           <section class="panel">
             <div class="panel__header">
               <div>
-                <p class="panel__eyebrow">Overview</p>
-                <h2>Flight Totals</h2>
+                <p class="panel__eyebrow">Board Snapshot</p>
+                <h2>Latest Completed Flight</h2>
               </div>
               <div id="csvMeta" class="panel__meta"></div>
             </div>
+            <div id="latestFlightCard" class="latest-flight-card-shell"></div>
             <div id="summaryCards" class="summary-cards"></div>
           </section>
 
@@ -299,7 +293,7 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-    <script src="tracker-core.js?v=20260414-routefix23"></script>
-    <script src="app.js?v=20260414-routefix23"></script>
+    <script src="tracker-core.js?v=20260415-tvmode1"></script>
+    <script src="app.js?v=20260415-tvmode1"></script>
   </body>
 </html>

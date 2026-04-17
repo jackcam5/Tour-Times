@@ -224,26 +224,13 @@ module WeatherHelpers
               box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
             }
             .brand-lockup {
-              display: flex;
-              align-items: center;
-              gap: 22px;
+              display: block;
               margin-bottom: 34px;
-            }
-            .brand-mark {
-              display: block;
-              width: min(240px, 42vw);
-              color: #f7f9fc;
-              flex: 0 0 auto;
-            }
-            .brand-mark svg {
-              display: block;
-              width: 100%;
-              height: auto;
-              filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.2));
             }
             .brand-wordmark {
               display: grid;
               gap: 6px;
+              justify-items: start;
             }
             .brand-wordmark__eyebrow,
             .brand-wordmark__subhead {
@@ -326,14 +313,6 @@ module WeatherHelpers
         <body>
           <main class="login-shell">
             <div class="brand-lockup">
-              <div class="brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 260 96" role="presentation" focusable="false">
-                  <polygon points="12,14 202,14 222,32 46,32" fill="currentColor"></polygon>
-                  <polygon points="12,30 154,30 168,48 12,48" fill="currentColor"></polygon>
-                  <polygon points="12,46 176,46 192,64 12,64" fill="currentColor"></polygon>
-                  <polygon points="130,56 214,56 230,74 146,74" fill="currentColor" opacity="0.96"></polygon>
-                </svg>
-              </div>
               <div class="brand-wordmark">
                 <p class="brand-wordmark__eyebrow">MyFlight</p>
                 <h1><span>Tour</span><span>Times</span></h1>
@@ -623,6 +602,14 @@ class AdminServlet < WEBrick::HTTPServlet::AbstractServlet
   end
 end
 
+class TvServlet < WEBrick::HTTPServlet::AbstractServlet
+  def do_GET(_req, res)
+    WeatherHelpers.serve_app_shell(res)
+  rescue StandardError => e
+    WeatherHelpers.json_response(res, { error: e.message }, status: 500)
+  end
+end
+
 class AdminLoginServlet < WEBrick::HTTPServlet::AbstractServlet
   def do_POST(req, res)
     password = req.query["password"].to_s.strip
@@ -787,6 +774,7 @@ server.mount "/api/shared-state", SharedStateServlet
 server.mount "/admin/login", AdminLoginServlet
 server.mount "/admin/logout", AdminLogoutServlet
 server.mount "/admin", AdminServlet
+server.mount "/tv", TvServlet
 trap("INT") { server.shutdown }
 trap("TERM") { server.shutdown }
 

@@ -6,6 +6,8 @@
   const APP_MODE =
     globalObject.location && /^\/admin\/?$/.test(globalObject.location.pathname)
       ? "admin"
+      : globalObject.location && /^\/tv\/?$/.test(globalObject.location.pathname)
+        ? "tv"
       : "public";
   const STORAGE_KEY = "mytourtimes-config-v2";
   const DB_NAME = "mytourtimes-browser-store";
@@ -17,6 +19,7 @@
   const CSV_SESSION_KEY = "mytourtimes-last-csv-v1";
   const CSV_PERSIST_KEY = "mytourtimes-last-csv-persist-v1";
   const FLIGHT_ANNOTATIONS_STORAGE_KEY = "mytourtimes-flight-annotations-v1";
+  const FLIGHT_EDITOR_NAME_STORAGE_KEY = "mytourtimes-flight-editor-name-v1";
   const WEATHER_HISTORY_DAYS = 7;
   const WEATHER_HISTORY_MS = WEATHER_HISTORY_DAYS * 24 * 60 * 60 * 1000;
   const WEATHER_REQUEST_TIMEOUT_MS = 5500;
@@ -68,6 +71,8 @@
     dashboardCards: document.getElementById("dashboardCards"),
     dashboardDetail: document.getElementById("dashboardDetail"),
     dateRangeLabel: document.getElementById("dateRangeLabel"),
+    lastUpdatedLabel: document.getElementById("lastUpdatedLabel"),
+    latestFlightCard: document.getElementById("latestFlightCard"),
     flightsTable: document.getElementById("flightsTable"),
     flightsMeta: document.getElementById("flightsMeta"),
     flightSearchInput: document.getElementById("flightSearchInput"),
@@ -111,8 +116,10 @@
     selectedDashboardLocationId: "",
     selectedDashboardTourId: "",
     selectedDashboardRouteSet: "",
+    selectedDashboardQuickFilter: "",
     flightSearchQuery: "",
     adminUnlocked: APP_MODE === "admin",
+    annotationEditorName: loadStoredFlightEditorName(),
     configEditorDirty: false,
     kmlFeatures: [],
     weatherByFlightId: {},
@@ -303,6 +310,27 @@
     }
   }
 
+  function loadStoredFlightEditorName() {
+    try {
+      return blank(localStorage.getItem(FLIGHT_EDITOR_NAME_STORAGE_KEY)).trim();
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function saveStoredFlightEditorName(value) {
+    try {
+      const normalized = blank(value).trim();
+      if (!normalized) {
+        localStorage.removeItem(FLIGHT_EDITOR_NAME_STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(FLIGHT_EDITOR_NAME_STORAGE_KEY, normalized);
+    } catch (error) {
+      return;
+    }
+  }
+
   function sanitizeFlightAnnotations(source) {
     if (!source || typeof source !== "object") {
       return {};
@@ -313,12 +341,14 @@
       const reason = blank(entry.reason).trim();
       const note = blank(entry.note).trim();
       const updatedAt = blank(entry.updatedAt).trim();
+      const updatedBy = blank(entry.updatedBy).trim();
       if (!key || (!reason && !note)) {
         return next;
       }
       next[key] = {
         reason: reason,
         note: note,
+        updatedBy: updatedBy,
         updatedAt: updatedAt || new Date().toISOString(),
       };
       return next;
@@ -454,6 +484,9 @@
     document.querySelectorAll("[data-admin-only]").forEach(function eachElement(element) {
       element.hidden = !adminOnlyVisible;
     });
+    if (APP_MODE === "tv" && state.activeTab !== "dashboard") {
+      state.activeTab = "dashboard";
+    }
     if (!adminOnlyVisible && state.activeTab === "admin") {
       state.activeTab = "dashboard";
     }
@@ -481,6 +514,125 @@
     return state.flightAnnotations[flight.stableKey] || null;
   }
 
+  function latestCompletedFlight() {
+    if (!state.analysis || !Array.isArray(state.analysis.flights) || !state.analysis.flights.length) {
+      return null;
+    }
+    return state.analysis.flights
+      .slice()
+      .sort(function byLatest(left, right) {
+        const leftTime = left.landingAt || left.takeoffAt;
+        const rightTime = right.landingAt || right.takeoffAt;
+        return rightTime.getTime() - leftTime.getTime();
+      })[0];
+  }
+
+  function formatPublishedAtLabel(isoText) {
+    const text = blank(isoText).trim();
+    if (!text) {
+      return "";
+    }
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function formatAuditStamp(annotation) {
+    if (!annotation) {
+      return "";
+    }
+    const parts = [];
+    if (blank(annotation.updatedBy).trim()) {
+      parts.push(blank(annotation.updatedBy).trim());
+    }
+    if (blank(annotation.updatedAt).trim()) {
+      parts.push(formatPublishedAtLabel(annotation.updatedAt));
+    }
+    return parts.join(" • ");
+  }
+
+  function normalizeFilterKey(value) {
+    return blank(value).trim().toLowerCase();
+  }
+
+  function dashboardQuickFilterOptions(locationFlights) {
+    const reasonCounts = {};
+    (locationFlights || []).forEach(function eachFlight(flight) {
+      const annotation = currentFlightAnnotation(flight);
+      const key = normalizeFilterKey(annotation && annotation.reason);
+      if (!key) {
+        return;
+      }
+      reasonCounts[key] = (reasonCounts[key] || 0) + 1;
+    });
+
+    const options = [
+      { key: "", label: "All Flights", count: locationFlights.length },
+      {
+        key: "__needs_review__",
+        label: "Needs Review",
+        count: locationFlights.filter(function eachFlight(flight) {
+          return !flight.assigned || !flightWithinGoalBuffer(flight);
+        }).length,
+      },
+    ];
+
+    FLIGHT_REASON_OPTIONS.forEach(function eachReason(reason) {
+      const key = normalizeFilterKey(reason);
+      if (!reasonCounts[key]) {
+        return;
+      }
+      options.push({
+        key: key,
+        label: reason,
+        count: reasonCounts[key],
+      });
+    });
+
+    Object.keys(reasonCounts)
+      .filter(function keepExtra(key) {
+        return !FLIGHT_REASON_OPTIONS.some(function eachReason(reason) {
+          return normalizeFilterKey(reason) === key;
+        });
+      })
+      .sort()
+      .forEach(function eachKey(key) {
+        options.push({
+          key: key,
+          label: key
+            .split(/\s+/)
+            .map(function titleize(part) {
+              return part.charAt(0).toUpperCase() + part.slice(1);
+            })
+            .join(" "),
+          count: reasonCounts[key],
+        });
+      });
+
+    return options.filter(function keepOption(option) {
+      return option.key === "" || option.count > 0;
+    });
+  }
+
+  function flightMatchesDashboardQuickFilter(flight) {
+    const filterKey = normalizeFilterKey(state.selectedDashboardQuickFilter);
+    if (!filterKey) {
+      return true;
+    }
+    if (filterKey === "__needs_review__") {
+      return !flight.assigned || !flightWithinGoalBuffer(flight);
+    }
+    const annotation = currentFlightAnnotation(flight);
+    return normalizeFilterKey(annotation && annotation.reason) === filterKey;
+  }
+
   function flightWithinGoalBuffer(flight) {
     return Boolean(
       flight &&
@@ -494,7 +646,8 @@
     const active = document.activeElement;
     return Boolean(
       active &&
-        (active.id === "flightReasonSelect" ||
+        (active.id === "flightReasonEditorName" ||
+          active.id === "flightReasonSelect" ||
           active.id === "flightReasonNote" ||
           active.closest("[data-flight-annotation-editor]"))
     );
@@ -568,13 +721,14 @@
     });
   }
 
-  function saveFlightAnnotationForSelectedFlight(reason, note) {
+  function saveFlightAnnotationForSelectedFlight(reason, note, updatedBy) {
     const flight = currentFlight();
     if (!flight || !flight.stableKey) {
       return;
     }
     const nextReason = blank(reason).trim();
     const nextNote = blank(note).trim();
+    const nextUpdatedBy = blank(updatedBy).trim();
     if (!nextReason && !nextNote) {
       delete state.flightAnnotations[flight.stableKey];
       saveFlightAnnotations();
@@ -582,9 +736,12 @@
       setStatus("success", "Flight reason cleared.");
       return;
     }
+    state.annotationEditorName = nextUpdatedBy;
+    saveStoredFlightEditorName(nextUpdatedBy);
     state.flightAnnotations[flight.stableKey] = {
       reason: nextReason,
       note: nextNote,
+      updatedBy: nextUpdatedBy,
       updatedAt: new Date().toISOString(),
     };
     saveFlightAnnotations();
@@ -699,7 +856,7 @@
       globalObject.clearInterval(sharedRefreshTimerId);
       sharedRefreshTimerId = 0;
     }
-    if (APP_MODE !== "public" || !canUseServerApi()) {
+    if ((APP_MODE !== "public" && APP_MODE !== "tv") || !canUseServerApi()) {
       return;
     }
     sharedRefreshTimerId = globalObject.setInterval(function refreshSharedState() {
@@ -1203,11 +1360,16 @@
     renderTabs();
     renderCsvMeta();
     renderMapping();
+    renderLatestFlightCard();
 
     if (state.activeTab === "dashboard") {
       renderSummaryCards();
       renderDashboard();
-      renderDashboardDetail();
+      if (APP_MODE === "tv") {
+        elements.dashboardDetail.innerHTML = "";
+      } else {
+        renderDashboardDetail();
+      }
     }
 
     if (state.activeTab === "flights") {
@@ -1238,6 +1400,13 @@
       state.analysis && state.analysis.summary.start && state.analysis.summary.end
         ? core.formatDateRange(state.analysis.summary.start, state.analysis.summary.end)
         : "";
+    if (elements.lastUpdatedLabel) {
+      const publishedAtLabel = formatPublishedAtLabel(state.lastSharedPublishedAt);
+      elements.lastUpdatedLabel.textContent = publishedAtLabel
+        ? "Last updated " + publishedAtLabel
+        : "";
+      elements.lastUpdatedLabel.hidden = !publishedAtLabel;
+    }
   }
 
   function renderCsvMeta() {
@@ -1342,6 +1511,61 @@
       renderSummaryCard("Unmatched", summary.unmatchedFlights) +
       renderSummaryCard("Avg Matched", core.formatDuration(summary.avgMatchedMinutes)) +
       renderSummaryCard("Locations", summary.byLocation.length);
+  }
+
+  function renderLatestFlightCard() {
+    if (!elements.latestFlightCard) {
+      return;
+    }
+    const flight = latestCompletedFlight();
+    if (!flight) {
+      elements.latestFlightCard.innerHTML =
+        "<div class='empty-state latest-flight-card'>Load a CSV to highlight the latest completed flight.</div>";
+      return;
+    }
+    const evaluation = flight.bestEvaluation;
+    const annotation = currentFlightAnnotation(flight);
+    const eventTime = flight.landingAt || flight.takeoffAt;
+    const whenLabel = eventTime
+      ? new Intl.DateTimeFormat(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(eventTime)
+      : "Unknown";
+    elements.latestFlightCard.innerHTML =
+      "<article class='latest-flight-card'>" +
+      "<div class='latest-flight-card__header'><div><p class='panel__eyebrow'>Latest completed</p><h3>" +
+      escapeHtml(flight.tailNumber || "Unknown aircraft") +
+      "</h3></div><div class='card-header__meta'><span class='pill'>" +
+      escapeHtml(flight.durationLabel) +
+      "</span>" +
+      flightStatusPill(flight) +
+      "</div></div>" +
+      "<div class='latest-flight-card__grid'>" +
+      "<div><span class='latest-flight-card__label'>Location</span><strong>" +
+      escapeHtml(flight.locationName || "Unassigned") +
+      "</strong></div>" +
+      "<div><span class='latest-flight-card__label'>Tour</span><strong>" +
+      escapeHtml(evaluation && evaluation.assigned ? evaluation.tourName : "No match") +
+      "</strong></div>" +
+      "<div><span class='latest-flight-card__label'>Finished</span><strong>" +
+      escapeHtml(whenLabel) +
+      "</strong></div>" +
+      "<div><span class='latest-flight-card__label'>Route Set</span><strong>" +
+      escapeHtml(blank(evaluation && evaluation.routeSet).trim() || "Standard") +
+      "</strong></div>" +
+      "</div>" +
+      (annotation
+        ? "<div class='latest-flight-card__note'>" +
+          renderFlightReasonPill(annotation) +
+          (blank(annotation.note).trim()
+            ? "<p>" + escapeHtml(truncateText(annotation.note, 140)) + "</p>"
+            : "") +
+          "</div>"
+        : "") +
+      "</article>";
   }
 
   function renderSummaryCard(label, value) {
@@ -1516,7 +1740,7 @@
       state.selectedDashboardTourId = "";
     }
 
-    const flights = state.analysis.flights.filter(function filterFlight(flight) {
+    const locationFlights = state.analysis.flights.filter(function filterFlight(flight) {
       if (flight.locationId !== locationSummary.locationId) {
         return false;
       }
@@ -1529,6 +1753,19 @@
       return flight.bestEvaluation && flight.bestEvaluation.tourId === state.selectedDashboardTourId;
     });
 
+    const quickFilters = dashboardQuickFilterOptions(locationFlights);
+    if (
+      state.selectedDashboardQuickFilter &&
+      !quickFilters.some(function hasFilter(filterOption) {
+        return normalizeFilterKey(filterOption.key) === normalizeFilterKey(state.selectedDashboardQuickFilter);
+      })
+    ) {
+      state.selectedDashboardQuickFilter = "";
+    }
+
+    const flights = locationFlights.filter(function filterByQuickFilter(flight) {
+      return flightMatchesDashboardQuickFilter(flight);
+    });
     const goodFlights = flights.filter(function isGood(flight) {
       return flightWithinGoalBuffer(flight);
     });
@@ -1546,9 +1783,12 @@
         return false;
       }
       if (!state.selectedDashboardTourId) {
-        return true;
+        return flightMatchesDashboardQuickFilter(flight);
       }
-      return !flight.bestEvaluation || flight.bestEvaluation.tourId === state.selectedDashboardTourId;
+      return (
+        (!flight.bestEvaluation || flight.bestEvaluation.tourId === state.selectedDashboardTourId) &&
+        flightMatchesDashboardQuickFilter(flight)
+      );
     });
 
     const tourButtons = locationSummary.rows
@@ -1602,6 +1842,27 @@
         "</div>"
       : "";
 
+    const quickFilterButtons =
+      "<div class='quick-filter-row'>" +
+      quickFilters
+        .map(function eachFilter(filterOption) {
+          return (
+            "<button class='tour-pill" +
+            (normalizeFilterKey(filterOption.key) === normalizeFilterKey(state.selectedDashboardQuickFilter)
+              ? " is-active"
+              : "") +
+            "' data-dashboard-quick-filter='" +
+            escapeHtml(filterOption.key) +
+            "'>" +
+            escapeHtml(filterOption.label) +
+            " <span>" +
+            escapeHtml(String(filterOption.count)) +
+            "</span></button>"
+          );
+        })
+        .join("") +
+      "</div>";
+
     elements.dashboardDetail.innerHTML =
       "<div class='dashboard-detail-stack'><div class='detail-card detail-card--filters'><div class='panel__header'><div><h3>" +
       escapeHtml(locationSummary.name) +
@@ -1613,6 +1874,7 @@
       escapeHtml(String(operationalFlights.length)) +
       " operational</span></div></div>" +
       routeSetButtons +
+      quickFilterButtons +
       "<div class='tour-pill-row'><button class='tour-pill" +
       (state.selectedDashboardTourId ? "" : " is-active") +
       "' data-dashboard-location='" +
@@ -1713,10 +1975,14 @@
       return "<span class='muted'>—</span>";
     }
     const summary = truncateText(annotation.note, 52);
+    const auditStamp = formatAuditStamp(annotation);
     return (
       "<div class='flight-reason-cell'>" +
       renderFlightReasonPill(annotation) +
       (summary ? "<span class='flight-reason-cell__note'>" + escapeHtml(summary) + "</span>" : "") +
+      (auditStamp
+        ? "<span class='flight-reason-cell__audit'>" + escapeHtml(auditStamp) + "</span>"
+        : "") +
       "</div>"
     );
   }
@@ -1813,6 +2079,7 @@
       flight.bestEvaluation ? flight.bestEvaluation.routeSet : "",
       currentFlightAnnotation(flight) ? currentFlightAnnotation(flight).reason : "",
       currentFlightAnnotation(flight) ? currentFlightAnnotation(flight).note : "",
+      currentFlightAnnotation(flight) ? currentFlightAnnotation(flight).updatedBy : "",
       flight.status,
       flight.trackId,
       flight.zoneHitNames.join(" "),
@@ -1908,11 +2175,16 @@
   function renderFlightAnnotationCard(flight, annotation) {
     const currentReason = annotation ? blank(annotation.reason).trim() : "";
     const currentNote = annotation ? blank(annotation.note) : "";
+    const currentUpdatedBy = annotation ? blank(annotation.updatedBy).trim() : state.annotationEditorName;
+    const auditStamp = formatAuditStamp(annotation);
     const readOnlySummary = currentReason || currentNote
       ? "<div class='flight-annotation-summary'>" +
         (currentReason ? renderFlightReasonPill(annotation) : "") +
         (currentNote
           ? "<p class='flight-annotation-summary__note'>" + escapeHtml(currentNote) + "</p>"
+          : "") +
+        (auditStamp
+          ? "<p class='flight-annotation-summary__audit'>" + escapeHtml(auditStamp) + "</p>"
           : "") +
         "</div>"
       : "<p class='muted'>No exception reason has been saved for this flight.</p>";
@@ -1930,6 +2202,9 @@
       "<div class='flight-annotation-editor' data-flight-annotation-editor='" +
       escapeHtml(flight.stableKey || "") +
       "'>" +
+      "<label class='field'><span>Updated by</span><input id='flightReasonEditorName' type='text' placeholder='Your name or initials' value='" +
+      escapeHtml(currentUpdatedBy) +
+      "' /></label>" +
       "<label class='field'><span>Reason</span><input id='flightReasonSelect' type='text' list='flightReasonOptions' placeholder='Photo Flight, Maintenance, Training...' value='" +
       escapeHtml(currentReason) +
       "' /><datalist id='flightReasonOptions'>" +
@@ -1940,6 +2215,9 @@
       "<label class='field'><span>Note</span><textarea id='flightReasonNote' rows='3' placeholder='Optional details for management or pilot review.'>" +
       escapeHtml(currentNote) +
       "</textarea></label>" +
+      (auditStamp
+        ? "<p class='flight-annotation-summary__audit'>" + escapeHtml(auditStamp) + "</p>"
+        : "") +
       "<div class='button-row'><button id='saveFlightAnnotationBtn' class='button button--small'>Save Flight Reason</button><button id='clearFlightAnnotationBtn' class='button button--ghost button--small'>Clear Reason</button></div>" +
       "</div></div>"
     );
@@ -2775,17 +3053,26 @@
 
   elements.flightDetail.addEventListener("click", function onFlightDetailClick(event) {
     if (event.target.id === "saveFlightAnnotationBtn") {
+      const editorInput = document.getElementById("flightReasonEditorName");
       const reasonInput = document.getElementById("flightReasonSelect");
       const noteInput = document.getElementById("flightReasonNote");
       saveFlightAnnotationForSelectedFlight(
         reasonInput ? reasonInput.value : "",
-        noteInput ? noteInput.value : ""
+        noteInput ? noteInput.value : "",
+        editorInput ? editorInput.value : ""
       );
       return;
     }
 
     if (event.target.id === "clearFlightAnnotationBtn") {
-      saveFlightAnnotationForSelectedFlight("", "");
+      saveFlightAnnotationForSelectedFlight("", "", state.annotationEditorName);
+    }
+  });
+
+  elements.flightDetail.addEventListener("input", function onFlightDetailInput(event) {
+    if (event.target.id === "flightReasonEditorName") {
+      state.annotationEditorName = event.target.value;
+      saveStoredFlightEditorName(event.target.value);
     }
   });
 
@@ -2812,6 +3099,13 @@
   });
 
   elements.dashboardDetail.addEventListener("click", function onDashboardDetailClick(event) {
+    const quickFilterTarget = event.target.closest("[data-dashboard-quick-filter]");
+    if (quickFilterTarget) {
+      state.selectedDashboardQuickFilter =
+        quickFilterTarget.getAttribute("data-dashboard-quick-filter") || "";
+      renderDashboardDetail();
+      return;
+    }
     const filterTarget = event.target.closest("[data-dashboard-location]");
     if (filterTarget) {
       state.selectedDashboardLocationId = filterTarget.getAttribute("data-dashboard-location");

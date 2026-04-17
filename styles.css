@@ -63,40 +63,24 @@ body {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 22px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
   padding: 24px 26px;
   border-radius: 24px;
   margin-bottom: 14px;
 }
 
 .brand-lockup {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 22px;
+  display: block;
   min-width: 0;
-}
-
-.brand-mark {
-  display: block;
-  width: clamp(180px, 20vw, 280px);
-  color: #f7f9fc;
-  flex: 0 0 auto;
-}
-
-.brand-mark svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.2));
 }
 
 .brand-wordmark {
   display: grid;
   gap: 6px;
   min-width: 0;
+  justify-items: start;
 }
 
 .brand-wordmark__eyebrow,
@@ -168,9 +152,10 @@ body {
 }
 
 .topbar__actions {
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-content: start;
-  padding-top: 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 .button,
@@ -210,6 +195,8 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 18px;
+  flex-wrap: wrap;
+  align-items: center;
   padding: 12px 14px;
   border-radius: 18px;
   margin-bottom: 14px;
@@ -225,6 +212,7 @@ body {
 .toolbar__group:last-child {
   flex: 1;
   justify-content: flex-end;
+  row-gap: 6px;
 }
 
 .tab-button {
@@ -246,6 +234,19 @@ body.mode-public .topbar {
   grid-template-columns: minmax(0, 1fr);
 }
 
+body.mode-tv .topbar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.mode-tv .topbar__actions,
+body.mode-tv .toolbar__group:first-child {
+  display: none !important;
+}
+
+body.mode-tv .toolbar {
+  justify-content: flex-end;
+}
+
 .date-range {
   color: #f08b86;
   font-size: clamp(0.95rem, 1.8vw, 1.25rem);
@@ -254,6 +255,15 @@ body.mode-public .topbar {
   white-space: normal;
   overflow-wrap: anywhere;
   max-width: 100%;
+}
+
+.last-updated {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .status {
@@ -526,6 +536,7 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  margin-top: 12px;
 }
 
 .summary-card {
@@ -739,6 +750,72 @@ textarea {
   line-height: 1.35;
 }
 
+.flight-reason-cell__audit,
+.flight-annotation-summary__audit {
+  color: #7fc6ff;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.latest-flight-card-shell {
+  display: grid;
+}
+
+.latest-flight-card {
+  border-radius: 16px;
+  padding: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(125, 211, 252, 0.14), transparent 32%),
+    var(--panel-2);
+  border: 1px solid rgba(125, 211, 252, 0.12);
+}
+
+.latest-flight-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.latest-flight-card h3 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.latest-flight-card__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.latest-flight-card__label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.latest-flight-card__grid strong {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.latest-flight-card__note {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.latest-flight-card__note p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
 .flight-map,
 .editor-map {
   min-height: 420px;
@@ -919,6 +996,13 @@ textarea {
 }
 
 .route-set-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.quick-filter-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1134,6 +1218,46 @@ textarea {
   color: #edf3fb;
 }
 
+body.mode-tv #dashboardTab .panel:first-child {
+  grid-column: span 4;
+}
+
+body.mode-tv #dashboardTab .panel:nth-child(2) {
+  grid-column: span 8;
+}
+
+body.mode-tv #dashboardTab .panel:nth-child(3) {
+  display: none;
+}
+
+body.mode-tv .summary-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.mode-tv .dashboard-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.mode-tv .location-card__head h3 {
+  font-size: 1.25rem;
+}
+
+body.mode-tv .mini-table th {
+  font-size: 0.78rem;
+}
+
+body.mode-tv .mini-table td {
+  font-size: 0.96rem;
+}
+
+body.mode-tv .date-range {
+  font-size: clamp(1.05rem, 2vw, 1.45rem);
+}
+
+body.mode-tv .last-updated {
+  font-size: 0.9rem;
+}
+
 @media (max-width: 1440px) {
   .topbar {
     grid-template-columns: 1fr;
@@ -1168,6 +1292,11 @@ textarea {
   .loading-overlay {
     top: 78px;
     right: 12px;
+  }
+
+  body.mode-tv #dashboardTab .panel:first-child,
+  body.mode-tv #dashboardTab .panel:nth-child(2) {
+    grid-column: span 12;
   }
 
   #flightsTab .panel:first-child {
@@ -1215,11 +1344,6 @@ textarea {
 
   .brand-lockup {
     width: 100%;
-    grid-template-columns: 1fr;
-  }
-
-  .brand-mark {
-    width: min(240px, 100%);
   }
 
   .toolbar,
@@ -1250,6 +1374,10 @@ textarea {
   .gate-form,
   .dashboard-detail-grid,
   .weather-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .latest-flight-card__grid {
     grid-template-columns: 1fr;
   }
 

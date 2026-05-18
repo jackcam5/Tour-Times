@@ -774,7 +774,9 @@
       const withinMax = !tour.maxMinutes || flight.durationMinutes <= tour.maxMinutes;
       const withinDurationWindow = withinMin && withinMax;
       const diffFromGoal = flight.durationMinutes - tour.goalMinutes;
-      const withinGoalBuffer = flight.durationMinutes <= tour.goalMinutes + GOAL_BUFFER_MINUTES;
+      const withinGoalBuffer =
+        !tour.goalMinutes || flight.durationMinutes <= tour.goalMinutes + GOAL_BUFFER_MINUTES;
+      const plannedRouteMatch = allZonesHit && withinDurationWindow;
       const matchScore =
         matchedZones.length * 100 +
         (allZonesHit ? 400 : 0) +
@@ -792,7 +794,8 @@
         matchedZones: matchedZones,
         allZonesHit: allZonesHit,
         withinDurationWindow: withinDurationWindow,
-        assigned: allZonesHit && withinDurationWindow,
+        plannedRouteMatch: plannedRouteMatch,
+        assigned: plannedRouteMatch && withinGoalBuffer,
         minMinutes: tour.minMinutes,
         maxMinutes: tour.maxMinutes,
         goalMinutes: tour.goalMinutes,
@@ -808,6 +811,9 @@
         if (left.assigned !== right.assigned) {
           return left.assigned ? -1 : 1;
         }
+        if (left.plannedRouteMatch !== right.plannedRouteMatch) {
+          return left.plannedRouteMatch ? -1 : 1;
+        }
         if (left.matchScore !== right.matchScore) {
           return right.matchScore - left.matchScore;
         }
@@ -821,14 +827,15 @@
     flight.evaluations = evaluations;
     flight.bestEvaluation = bestEvaluation;
     flight.assigned = Boolean(bestEvaluation && bestEvaluation.assigned);
-    flight.locationId = bestEvaluation && bestEvaluation.assigned ? bestEvaluation.locationId : "";
-    flight.locationName = bestEvaluation && bestEvaluation.assigned ? bestEvaluation.locationName : "Unassigned";
+    flight.locationId = bestEvaluation && bestEvaluation.allZonesHit ? bestEvaluation.locationId : "";
+    flight.locationName =
+      bestEvaluation && bestEvaluation.allZonesHit ? bestEvaluation.locationName : "Unassigned";
     flight.status = !bestEvaluation
       ? "Unassigned"
       : bestEvaluation.assigned
-        ? bestEvaluation.withinGoalBuffer
-          ? "On Plan"
-          : "Over Goal"
+        ? "On Plan"
+        : bestEvaluation.plannedRouteMatch
+          ? "Custom Flight"
         : bestEvaluation.allZonesHit
           ? "Outside Duration"
           : "Unassigned";
@@ -893,7 +900,9 @@
         totalFlights: rows.reduce(function sum(total, row) { return total + row.count; }, 0),
         avgLoadMinutes: average(
           flights
-            .filter(function eachFlight(flight) { return flight.locationId === location.id; })
+            .filter(function eachFlight(flight) {
+              return flight.locationId === location.id && flight.assigned;
+            })
             .map(function eachFlight(flight) { return flight.durationMinutes; })
         ),
       };

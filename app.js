@@ -106,6 +106,7 @@
     adminLocationTitle: document.getElementById("adminLocationTitle"),
     tourMatrix: document.getElementById("tourMatrix"),
     zoneInspector: document.getElementById("zoneInspector"),
+    adminNonTourAnalytics: document.getElementById("adminNonTourAnalytics"),
     configEditor: document.getElementById("configEditor"),
     dashboardTab: document.getElementById("dashboardTab"),
     flightsTab: document.getElementById("flightsTab"),
@@ -168,6 +169,9 @@
 
   if (document.body) {
     document.body.classList.add("mode-" + APP_MODE);
+    if (VIEW_LOCATION_SLUG) {
+      document.body.classList.add("mode-scoped-location");
+    }
   }
 
   function blank(value) {
@@ -741,7 +745,7 @@
         key: "__needs_review__",
         label: "Needs Review",
         count: locationFlights.filter(function eachFlight(flight) {
-          return !flight.assigned || !flightWithinGoalBuffer(flight);
+          return isNonTourFlight(flight);
         }).length,
       },
     ];
@@ -789,19 +793,67 @@
       return true;
     }
     if (filterKey === "__needs_review__") {
-      return !flight.assigned || !flightWithinGoalBuffer(flight);
+      return isNonTourFlight(flight);
     }
     const annotation = currentFlightAnnotation(flight);
     return normalizeFilterKey(annotation && annotation.reason) === filterKey;
   }
 
+  function flightExceededTourParameters(flight) {
+    return Boolean(
+      flight &&
+        flight.bestEvaluation &&
+        flight.bestEvaluation.plannedRouteMatch &&
+        !flight.bestEvaluation.withinGoalBuffer
+    );
+  }
+
   function flightWithinGoalBuffer(flight) {
     return Boolean(
       flight &&
-        flight.assigned &&
         flight.bestEvaluation &&
-        flight.durationMinutes <= flight.bestEvaluation.goalMinutes + GOAL_BUFFER_MINUTES
+        flight.bestEvaluation.plannedRouteMatch &&
+        flight.bestEvaluation.withinGoalBuffer
     );
+  }
+
+  function isNonTourFlight(flight) {
+    return Boolean(flight) && !flightWithinGoalBuffer(flight);
+  }
+
+  function inferredNonTourReason(flight) {
+    const annotation = currentFlightAnnotation(flight);
+    const explicitReason = blank(annotation && annotation.reason).trim();
+    if (explicitReason) {
+      return explicitReason;
+    }
+    if (flightExceededTourParameters(flight)) {
+      return "Custom Flight";
+    }
+    if (flight && flight.bestEvaluation && flight.bestEvaluation.allZonesHit) {
+      return "Outside Duration";
+    }
+    if (flight && flight.zoneHits && flight.zoneHits.length) {
+      return "No Matching Tour";
+    }
+    return "Unclassified";
+  }
+
+  function primaryTourLabelForFlight(flight) {
+    const evaluation = flight && flight.bestEvaluation;
+    if (!evaluation) {
+      return "No match";
+    }
+    if (evaluation.assigned) {
+      return evaluation.tourName;
+    }
+    if (evaluation.plannedRouteMatch) {
+      return "Custom Flight";
+    }
+    if (evaluation.allZonesHit) {
+      return "Outside Duration";
+    }
+    return "No match";
   }
 
   function isEditingFlightAnnotation() {
@@ -1941,7 +1993,7 @@
       escapeHtml(displayLocationNameForFlight(flight)) +
       "</strong></div>" +
       "<div><span class='latest-flight-card__label'>Tour</span><strong>" +
-      escapeHtml(evaluation && evaluation.assigned ? evaluation.tourName : "No match") +
+      escapeHtml(primaryTourLabelForFlight(flight)) +
       "</strong></div>" +
       "<div><span class='latest-flight-card__label'>Finished</span><strong>" +
       escapeHtml(whenLabel) +
@@ -2083,7 +2135,11 @@
       })
       .map(function eachRow(row) {
         const matches = flightsForCurrentView().filter(function eachFlight(flight) {
-          return flight.bestEvaluation && flight.bestEvaluation.tourId === row.tourId;
+          return (
+            flight.assigned &&
+            flight.bestEvaluation &&
+            flight.bestEvaluation.tourId === row.tourId
+          );
         });
         const fastest = matches
           .slice()
@@ -2351,7 +2407,7 @@
         "Shortest Actual Flight",
         shortestFlight ? shortestFlight.durationLabel : "No Data",
         shortestFlight
-          ? (shortestFlight.bestEvaluation ? shortestFlight.bestEvaluation.tourName : "No match")
+          ? primaryTourLabelForFlight(shortestFlight)
           : routeSetLabel
       ) +
       renderLocationStatCard(
@@ -2462,10 +2518,10 @@
       return flightMatchesDashboardQuickFilter(flight);
     });
     const goodFlights = flights.filter(function isGood(flight) {
-      return flightWithinGoalBuffer(flight);
+      return !isNonTourFlight(flight);
     });
     const badFlights = flights.filter(function isBad(flight) {
-      return !flight.assigned || !flightWithinGoalBuffer(flight);
+      return isNonTourFlight(flight);
     });
     const operationalFlights = flightsForCurrentView().filter(function filterOperationalFlight(flight) {
       if (!currentFlightAnnotation(flight)) {
@@ -2648,8 +2704,8 @@
     if (flightWithinGoalBuffer(flight)) {
       return "<span class='pill pill--good'>On Plan</span>";
     }
-    if (flight.assigned) {
-      return "<span class='pill pill--bad'>Overflown</span>";
+    if (flightExceededTourParameters(flight)) {
+      return "<span class='pill pill--bad'>Custom Flight</span>";
     }
     if (flight.bestEvaluation.allZonesHit) {
       return "<span class='pill pill--warn'>Outside Duration</span>";
@@ -2668,18 +2724,31 @@
 
   function renderMatchedTourCell(flight) {
     const evaluation = flight.bestEvaluation;
-    const tourName = evaluation && evaluation.assigned ? evaluation.tourName : "No match";
+    const tourName = primaryTourLabelForFlight(flight);
     const routeSet =
-      evaluation && evaluation.assigned && blank(evaluation.routeSet).trim()
+      evaluation && (evaluation.assigned || evaluation.plannedRouteMatch) && blank(evaluation.routeSet).trim()
         ? "<span class='pill pill--tag'>" + escapeHtml(blank(evaluation.routeSet).trim()) + "</span>"
         : "";
-    return "<div class='matched-tour-cell'><span>" + escapeHtml(tourName) + "</span>" + routeSet + "</div>";
+    const sourceTour =
+      evaluation && !evaluation.assigned && evaluation.plannedRouteMatch
+        ? "<span class='pill pill--muted'>" + escapeHtml(evaluation.tourName) + "</span>"
+        : "";
+    return (
+      "<div class='matched-tour-cell'><span>" +
+      escapeHtml(tourName) +
+      "</span>" +
+      routeSet +
+      sourceTour +
+      "</div>"
+    );
   }
 
   function renderFlightReasonCell(flight) {
     const annotation = currentFlightAnnotation(flight);
     if (!annotation) {
-      return "<span class='muted'>—</span>";
+      return isNonTourFlight(flight)
+        ? "<span class='pill pill--muted'>" + escapeHtml(inferredNonTourReason(flight)) + "</span>"
+        : "<span class='muted'>—</span>";
     }
     const summary = truncateText(annotation.note, 52);
     const auditStamp = formatAuditStamp(annotation);
@@ -2845,6 +2914,9 @@
         if (left.assigned !== right.assigned) {
           return left.assigned ? -1 : 1;
         }
+        if (left.plannedRouteMatch !== right.plannedRouteMatch) {
+          return left.plannedRouteMatch ? -1 : 1;
+        }
         return right.matchScore - left.matchScore;
       })
       .map(function eachEvaluation(evaluation) {
@@ -2866,6 +2938,8 @@
           "</p><div class='card-header__meta'>" +
           (evaluation.assigned
             ? "<span class='pill pill--good'>Matched</span>"
+            : evaluation.plannedRouteMatch
+              ? "<span class='pill pill--bad'>Custom Flight</span>"
             : evaluation.allZonesHit
               ? "<span class='pill pill--warn'>Zone match but duration out of range</span>"
               : "<span class='pill pill--muted'>Did not qualify</span>") +
@@ -3087,6 +3161,7 @@
     renderLocationEditor();
     renderTourMatrix();
     renderZoneInspector();
+    renderAdminNonTourAnalytics();
   }
 
   function renderAdminGate() {
@@ -3358,6 +3433,180 @@
         .join("") +
       "</div></div>" +
       kmlMarkup;
+  }
+
+  function localDayKey(date) {
+    if (!date || Number.isNaN(date.getTime())) {
+      return "";
+    }
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  function formatDayKeyLabel(dayKey) {
+    if (!dayKey) {
+      return "Unknown";
+    }
+    const date = new Date(dayKey + "T12:00:00");
+    if (Number.isNaN(date.getTime())) {
+      return dayKey;
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(date);
+  }
+
+  function dominantKeyFromCounts(counts) {
+    return Object.keys(counts || {}).sort(function byCount(left, right) {
+      return counts[right] - counts[left];
+    })[0] || "";
+  }
+
+  function summarizeNonTourFlights(flights) {
+    const byDay = {};
+    const reasonCounts = {};
+    (flights || []).forEach(function eachFlight(flight) {
+      const dateKey = localDayKey(flight.takeoffAt || flight.landingAt);
+      if (!dateKey) {
+        return;
+      }
+      if (!byDay[dateKey]) {
+        byDay[dateKey] = {
+          dateKey: dateKey,
+          totalMinutes: 0,
+          count: 0,
+          reasonCounts: {},
+          tails: {},
+        };
+      }
+      const group = byDay[dateKey];
+      const reason = inferredNonTourReason(flight);
+      group.totalMinutes += Number(flight.durationMinutes) || 0;
+      group.count += 1;
+      group.reasonCounts[reason] = (group.reasonCounts[reason] || 0) + 1;
+      group.tails[blank(flight.tailNumber).trim() || "Unknown"] =
+        (group.tails[blank(flight.tailNumber).trim() || "Unknown"] || 0) + 1;
+      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+    });
+
+    const rows = Object.keys(byDay)
+      .sort(function byDayDesc(left, right) {
+        return right.localeCompare(left);
+      })
+      .map(function eachDay(dayKey) {
+        const group = byDay[dayKey];
+        const topReason = dominantKeyFromCounts(group.reasonCounts);
+        const topTail = dominantKeyFromCounts(group.tails);
+        const extraTailCount = Math.max(0, Object.keys(group.tails).length - 1);
+        return {
+          dateKey: dayKey,
+          label: formatDayKeyLabel(dayKey),
+          totalMinutes: group.totalMinutes,
+          totalLabel: core.formatDuration(group.totalMinutes),
+          count: group.count,
+          avgMinutes: group.count ? group.totalMinutes / group.count : 0,
+          avgLabel: group.count ? core.formatDuration(group.totalMinutes / group.count) : "0:00:00",
+          topReason: topReason || "Unclassified",
+          topTail: topTail ? topTail + (extraTailCount ? " +" + extraTailCount : "") : "—",
+        };
+      });
+
+    const totalMinutes = rows.reduce(function sum(total, row) {
+      return total + row.totalMinutes;
+    }, 0);
+    const topReason = dominantKeyFromCounts(reasonCounts) || "Unclassified";
+    const busiestDay = rows
+      .slice()
+      .sort(function byMinutes(left, right) {
+        return right.totalMinutes - left.totalMinutes;
+      })[0] || null;
+
+    return {
+      rows: rows,
+      totalMinutes: totalMinutes,
+      totalFlights: flights.length,
+      avgDailyMinutes: rows.length ? totalMinutes / rows.length : 0,
+      topReason: topReason,
+      busiestDay: busiestDay,
+    };
+  }
+
+  function renderAdminNonTourAnalytics() {
+    if (!elements.adminNonTourAnalytics) {
+      return;
+    }
+    if (!state.analysis) {
+      elements.adminNonTourAnalytics.innerHTML =
+        "<div class='empty-state'>Load stacked CSV exports to measure daily non-tour flight time here.</div>";
+      return;
+    }
+
+    const location = currentLocation();
+    const scopedFlights = state.analysis.flights.filter(function filterByLocation(flight) {
+      return !location || flightTouchesLocation(flight, location.id);
+    });
+    const nonTourFlights = scopedFlights.filter(function keepNonTourFlight(flight) {
+      return isNonTourFlight(flight);
+    });
+
+    if (!nonTourFlights.length) {
+      elements.adminNonTourAnalytics.innerHTML =
+        "<div class='empty-state'>No non-tour flight time is showing for " +
+        escapeHtml(location ? location.name : "this dataset") +
+        " in the current date range.</div>";
+      return;
+    }
+
+    const summary = summarizeNonTourFlights(nonTourFlights);
+    const scopeLabel = location ? location.name : "All locations";
+    const improvementNote = summary.busiestDay
+      ? "Biggest non-tour day: " +
+        summary.busiestDay.label +
+        " with " +
+        summary.busiestDay.totalLabel +
+        " across " +
+        summary.busiestDay.count +
+        " flights. Most common bucket: " +
+        summary.topReason +
+        "."
+      : "Non-tour time is being tracked for this location.";
+
+    elements.adminNonTourAnalytics.innerHTML =
+      "<div class='admin-ops-grid'><div class='admin-ops-callout'><p class='muted'>Reviewing " +
+      escapeHtml(scopeLabel) +
+      " only.</p><h3>Non-tour flight time is excluded from tour averages and grouped here so we can see where operating time is leaking.</h3><p class='muted'>" +
+      escapeHtml(improvementNote) +
+      "</p></div><div class='summary-cards admin-ops-summary'>" +
+      renderSummaryCard("Non-tour Flights", summary.totalFlights) +
+      renderSummaryCard("Non-tour Time", core.formatDuration(summary.totalMinutes)) +
+      renderSummaryCard("Avg Per Day", core.formatDuration(summary.avgDailyMinutes)) +
+      renderSummaryCard("Top Bucket", summary.topReason) +
+      "</div><div class='table-wrap'><table class='table admin-ops-table'><thead><tr><th>Date</th><th>Flights</th><th>Time Spent</th><th>Avg / Flight</th><th>Top Reason</th><th>Aircraft</th></tr></thead><tbody>" +
+      summary.rows
+        .map(function eachRow(row) {
+          return (
+            "<tr><td>" +
+            escapeHtml(row.label) +
+            "</td><td>" +
+            escapeHtml(String(row.count)) +
+            "</td><td>" +
+            escapeHtml(row.totalLabel) +
+            "</td><td>" +
+            escapeHtml(row.avgLabel) +
+            "</td><td>" +
+            escapeHtml(row.topReason) +
+            "</td><td>" +
+            escapeHtml(row.topTail) +
+            "</td></tr>"
+          );
+        })
+        .join("") +
+      "</tbody></table></div></div>";
   }
 
   function routeSegmentColor(startPoint, endPoint, index, totalSegments, flight) {

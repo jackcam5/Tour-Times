@@ -22,7 +22,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700;1,800&display=swap"
     />
-    <link rel="stylesheet" href="styles.css?v=20260415-brandclean1" />
+    <link rel="stylesheet" href="/styles.css?v=20260517-multicsv1" />
   </head>
   <body>
     <div class="app-shell">
@@ -36,8 +36,8 @@
         </div>
         <div class="topbar__actions" data-admin-only>
           <label class="button">
-            Upload CSV
-            <input id="csvInput" type="file" accept=".csv,text/csv" hidden />
+            Upload CSVs
+            <input id="csvInput" type="file" accept=".csv,text/csv" multiple hidden />
           </label>
           <button id="publishStateBtn" class="button button--ghost">Publish Weekly View</button>
           <button id="clearSheetBtn" class="button button--ghost">Clear Sheet</button>
@@ -260,8 +260,9 @@
                     <label id="csvDropZone" class="dropzone">
                       <span class="dropzone__title">Drop Spidertracks CSV files here or click to browse</span>
                       <span class="dropzone__body">
-                        Default mapping uses `Aircraft`, `DateTime(Local)`, `Latitude(decimal)`,
-                        `Longitude(decimal)`, and `Description`.
+                        Upload one or many exports. New CSVs stack onto the current board until you use
+                        `Clear Sheet`. Default mapping uses `Aircraft`, `DateTime(Local)`,
+                        `Latitude(decimal)`, `Longitude(decimal)`, and `Description`.
                       </span>
                     </label>
                     <div id="mappingPanel" class="mapping-grid"></div>
@@ -293,7 +294,7 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-    <script src="tracker-core.js?v=20260415-tvmode1"></script>
-    <script src="app.js?v=20260415-tvmode1"></script>
+    <script src="/tracker-core.js?v=20260517-multicsv1"></script>
+    <script src="/app.js?v=20260517-multicsv1"></script>
   </body>
 </html>

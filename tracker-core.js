@@ -35,8 +35,12 @@
       {
         id: "detroit",
         name: "Detroit",
+        slug: "detroit",
         shortName: "DETROIT",
         color: "#1d5fa7",
+        boardSize: "large",
+        showOnDashboard: true,
+        showOnTv: true,
         weatherStations: ["KDET"],
         routeSets: ["Normal", "TFR"],
         zones: [
@@ -63,8 +67,12 @@
       {
         id: "smoky",
         name: "Smoky Mountains",
+        slug: "smoky-mountains",
         shortName: "SMOKY",
         color: "#377d22",
+        boardSize: "medium",
+        showOnDashboard: true,
+        showOnTv: true,
         weatherStations: ["KGKT"],
         routeSets: ["Standard"],
         zones: [
@@ -157,6 +165,16 @@
 
   function blank(value) {
     return value == null ? "" : String(value);
+  }
+
+  function slugify(value) {
+    return blank(value)
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
   }
 
   function makeFlightStableKey(flight) {
@@ -442,6 +460,7 @@
   function sanitizeLocation(location, index) {
     const source = location || {};
     const color = blank(source.color) || "#1d5fa7";
+    const name = blank(source.name) || "Location " + (index + 1);
     const zones = Array.isArray(source.zones) ? source.zones.slice(0, 10) : [];
     const routeSetsSource = Array.isArray(source.routeSets)
       ? source.routeSets
@@ -451,9 +470,15 @@
       : blank(source.weatherStations).split(/[,\s]+/);
     return {
       id: blank(source.id) || makeId("location"),
-      name: blank(source.name) || "Location " + (index + 1),
+      name: name,
+      slug: slugify(source.slug || name) || "location-" + (index + 1),
       shortName: blank(source.shortName) || blank(source.name || "Location").toUpperCase(),
       color,
+      boardSize: ["small", "medium", "large"].includes(blank(source.boardSize).trim().toLowerCase())
+        ? blank(source.boardSize).trim().toLowerCase()
+        : "medium",
+      showOnDashboard: source.showOnDashboard !== false,
+      showOnTv: source.showOnTv !== false,
       routeSets: routeSetsSource
         .map(function eachRouteSet(routeSet) { return blank(routeSet).trim(); })
         .filter(Boolean)
@@ -495,6 +520,18 @@
     const locations = Array.isArray(source.locations)
       ? source.locations.map(sanitizeLocation)
       : deepClone(DEFAULT_CONFIG.locations);
+    const slugCounts = {};
+    locations.forEach(function ensureUniqueSlug(location, index) {
+      const baseSlug = slugify(location.slug || location.name) || "location-" + (index + 1);
+      let nextSlug = baseSlug;
+      let bump = 2;
+      while (slugCounts[nextSlug]) {
+        nextSlug = baseSlug + "-" + bump;
+        bump += 1;
+      }
+      slugCounts[nextSlug] = true;
+      location.slug = nextSlug;
+    });
     const locationRouteSetMap = new Map(
       locations.map(function toEntry(location) {
         const routeSets = location.routeSets && location.routeSets.length
@@ -934,6 +971,31 @@
       .join("\n");
   }
 
+  function serializeCsv(headers, rows) {
+    const safeHeaders = Array.isArray(headers) ? headers.slice() : [];
+    const safeRows = Array.isArray(rows) ? rows : [];
+    return [safeHeaders]
+      .concat(
+        safeRows.map(function eachRow(row) {
+          if (Array.isArray(row)) {
+            return row;
+          }
+          return safeHeaders.map(function eachHeader(header) {
+            return row && Object.prototype.hasOwnProperty.call(row, header) ? row[header] : "";
+          });
+        })
+      )
+      .map(function eachRow(row) {
+        return row
+          .map(function eachCell(cell) {
+            const text = blank(cell).replace(/"/g, '""');
+            return '"' + text + '"';
+          })
+          .join(",");
+      })
+      .join("\n");
+  }
+
   const api = {
     DEFAULT_CONFIG: sanitizeConfig(DEFAULT_CONFIG),
     GOAL_BUFFER_MINUTES: GOAL_BUFFER_MINUTES,
@@ -950,6 +1012,8 @@
     parseTimestamp: parseTimestamp,
     rowsToObjects: rowsToObjects,
     sanitizeConfig: sanitizeConfig,
+    serializeCsv: serializeCsv,
+    slugify: slugify,
     toneForDifference: toneForDifference,
   };
 

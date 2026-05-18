@@ -754,6 +754,62 @@ class HealthServlet < WEBrick::HTTPServlet::AbstractServlet
   end
 end
 
+class AppShellServlet < WEBrick::HTTPServlet::AbstractServlet
+  PUBLIC_EXTENSIONS = %w[
+    .html
+    .css
+    .js
+    .png
+    .jpg
+    .jpeg
+    .gif
+    .svg
+    .ico
+    .json
+    .txt
+    .map
+    .webmanifest
+  ].freeze
+  PRIVATE_PREFIXES = %w[.cache .data github-upload].freeze
+
+  def do_GET(req, res)
+    relative_path = req.path.to_s.sub(%r{\A/+}, "")
+    if relative_path.empty?
+      WeatherHelpers.serve_app_shell(res)
+      return
+    end
+
+    absolute_path = File.expand_path(File.join(ROOT, relative_path), ROOT)
+    if public_file?(relative_path, absolute_path)
+      res.status = 200
+      res["Content-Type"] = WEBrick::HTTPUtils.mime_type(
+        absolute_path,
+        WEBrick::HTTPUtils::DefaultMimeTypes
+      )
+      res.body = File.binread(absolute_path)
+      return
+    end
+
+    WeatherHelpers.serve_app_shell(res)
+  end
+
+  def do_HEAD(req, res)
+    do_GET(req, res)
+    res.body = ""
+  end
+
+  private
+
+  def public_file?(relative_path, absolute_path)
+    return false unless absolute_path.start_with?(ROOT + File::SEPARATOR)
+    return false unless File.file?(absolute_path)
+    return false if relative_path.split("/").any? { |segment| segment.start_with?(".") }
+    return false if PRIVATE_PREFIXES.any? { |prefix| relative_path == prefix || relative_path.start_with?(prefix + "/") }
+
+    PUBLIC_EXTENSIONS.include?(File.extname(absolute_path).downcase)
+  end
+end
+
 server = WEBrick::HTTPServer.new(
   Port: Integer(ENV.fetch("PORT", "8000")),
   DocumentRoot: ROOT,
@@ -775,6 +831,7 @@ server.mount "/admin/login", AdminLoginServlet
 server.mount "/admin/logout", AdminLogoutServlet
 server.mount "/admin", AdminServlet
 server.mount "/tv", TvServlet
+server.mount "/", AppShellServlet
 trap("INT") { server.shutdown }
 trap("TERM") { server.shutdown }
 

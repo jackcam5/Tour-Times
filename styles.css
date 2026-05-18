@@ -169,9 +169,23 @@ body {
   transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
 
+a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .button:hover,
 .tab-button:hover {
   transform: translateY(-1px);
+}
+
+.button[disabled],
+.tab-button[disabled] {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .button {
@@ -236,6 +250,8 @@ body.mode-public .topbar {
 
 body.mode-tv .topbar {
   grid-template-columns: minmax(0, 1fr);
+  padding: 18px 22px;
+  margin-bottom: 10px;
 }
 
 body.mode-tv .topbar__actions,
@@ -245,6 +261,25 @@ body.mode-tv .toolbar__group:first-child {
 
 body.mode-tv .toolbar {
   justify-content: flex-end;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+}
+
+body.mode-tv .app-shell {
+  max-width: none;
+  padding: 12px;
+}
+
+body.mode-tv .brand-wordmark__subhead {
+  display: none;
+}
+
+body.mode-tv .tab-panel.is-active {
+  gap: 10px;
+}
+
+body.mode-tv .panel {
+  padding: 14px;
 }
 
 .date-range {
@@ -515,6 +550,21 @@ main {
   font-size: 0.82rem;
 }
 
+.field--checkbox {
+  justify-content: end;
+}
+
+.field--checkbox input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.field--links {
+  grid-column: span 2;
+}
+
 input,
 select,
 textarea {
@@ -559,15 +609,28 @@ textarea {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px;
 }
 
 .location-card {
+  grid-column: span 4;
   border-radius: 16px;
   overflow: hidden;
   background: var(--panel-2);
   border: 1px solid var(--line);
+}
+
+.location-card--small {
+  grid-column: span 3;
+}
+
+.location-card--medium {
+  grid-column: span 4;
+}
+
+.location-card--large {
+  grid-column: span 6;
 }
 
 .location-card.is-selected {
@@ -910,6 +973,13 @@ textarea {
   margin-top: 5px;
 }
 
+.stack-card__meta-line {
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .location-form,
 .zone-grid {
   display: grid;
@@ -1218,44 +1288,93 @@ textarea {
   color: #edf3fb;
 }
 
-body.mode-tv #dashboardTab .panel:first-child {
-  grid-column: span 4;
-}
-
+body.mode-tv #dashboardTab .panel:first-child,
 body.mode-tv #dashboardTab .panel:nth-child(2) {
-  grid-column: span 8;
+  grid-column: span 12;
 }
 
 body.mode-tv #dashboardTab .panel:nth-child(3) {
   display: none;
 }
 
+body.mode-tv #dashboardTab .panel:first-child {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 2.1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+body.mode-tv #dashboardTab .panel:first-child .panel__header {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+body.mode-tv .latest-flight-card-shell,
+body.mode-tv .latest-flight-card {
+  height: 100%;
+}
+
 body.mode-tv .summary-cards {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 0;
+  align-content: start;
+  gap: 8px;
 }
 
 body.mode-tv .dashboard-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
 }
 
-body.mode-tv .location-card__head h3 {
-  font-size: 1.25rem;
+body.mode-tv .summary-card {
+  min-height: 96px;
+  padding: 12px;
 }
 
-body.mode-tv .mini-table th {
-  font-size: 0.78rem;
+body.mode-tv .summary-card strong {
+  font-size: clamp(1.4rem, 2vw, 2rem);
 }
 
-body.mode-tv .mini-table td {
+body.mode-tv .latest-flight-card h3 {
+  font-size: clamp(1.35rem, 2vw, 2rem);
+}
+
+body.mode-tv .latest-flight-card {
+  padding: 14px;
+}
+
+body.mode-tv .latest-flight-card__header {
+  margin-bottom: 10px;
+}
+
+body.mode-tv .latest-flight-card__grid {
+  gap: 10px;
+}
+
+body.mode-tv .latest-flight-card__grid strong {
   font-size: 0.96rem;
 }
 
+body.mode-tv .location-card__head h3 {
+  font-size: 1.15rem;
+}
+
+body.mode-tv .mini-table th {
+  font-size: 0.74rem;
+}
+
+body.mode-tv .mini-table td {
+  font-size: 0.9rem;
+  padding: 8px 9px;
+}
+
 body.mode-tv .date-range {
-  font-size: clamp(1.05rem, 2vw, 1.45rem);
+  font-size: clamp(1rem, 1.8vw, 1.3rem);
 }
 
 body.mode-tv .last-updated {
-  font-size: 0.9rem;
+  font-size: 0.84rem;
 }
 
 @media (max-width: 1440px) {
@@ -1278,7 +1397,16 @@ body.mode-tv .last-updated {
   }
 
   .dashboard-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .location-card--small,
+  .location-card--medium {
+    grid-column: span 6;
+  }
+
+  .location-card--large {
+    grid-column: span 12;
   }
 
   .dashboard-detail-grid {
@@ -1294,9 +1422,12 @@ body.mode-tv .last-updated {
     right: 12px;
   }
 
-  body.mode-tv #dashboardTab .panel:first-child,
-  body.mode-tv #dashboardTab .panel:nth-child(2) {
-    grid-column: span 12;
+  body.mode-tv #dashboardTab .panel:first-child {
+    grid-template-columns: 1fr;
+  }
+
+  body.mode-tv .summary-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   #flightsTab .panel:first-child {
@@ -1375,6 +1506,18 @@ body.mode-tv .last-updated {
   .dashboard-detail-grid,
   .weather-grid {
     grid-template-columns: 1fr;
+  }
+
+  .location-card,
+  .location-card--small,
+  .location-card--medium,
+  .location-card--large,
+  .field--links {
+    grid-column: span 1;
+  }
+
+  body.mode-tv .summary-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .latest-flight-card__grid {

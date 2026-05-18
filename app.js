@@ -3,12 +3,31 @@
     return;
   }
 
-  const APP_MODE =
-    globalObject.location && /^\/admin\/?$/.test(globalObject.location.pathname)
-      ? "admin"
-      : globalObject.location && /^\/tv\/?$/.test(globalObject.location.pathname)
-        ? "tv"
-      : "public";
+  function parseAppRoute(pathname) {
+    const segments = String(pathname || "")
+      .split("/")
+      .filter(Boolean)
+      .map(function normalizeSegment(segment) {
+        return String(segment).trim().toLowerCase();
+      });
+    if (!segments.length) {
+      return { mode: "public", locationSlug: "" };
+    }
+    if (segments[0] === "admin") {
+      return { mode: "admin", locationSlug: "" };
+    }
+    if (segments[0] === "tv") {
+      return { mode: "tv", locationSlug: "" };
+    }
+    if (segments.length >= 2 && segments[1] === "tv") {
+      return { mode: "tv", locationSlug: segments[0] };
+    }
+    return { mode: "public", locationSlug: segments[0] };
+  }
+
+  const APP_ROUTE = parseAppRoute(globalObject.location && globalObject.location.pathname);
+  const APP_MODE = APP_ROUTE.mode;
+  const VIEW_LOCATION_SLUG = APP_ROUTE.locationSlug;
   const STORAGE_KEY = "mytourtimes-config-v2";
   const DB_NAME = "mytourtimes-browser-store";
   const DB_VERSION = 1;
@@ -128,6 +147,7 @@
     loadingMessage: "Loading...",
     lastSharedPublishedAt: "",
     pendingFlightDetailRefresh: false,
+    csvImportCount: 0,
   };
 
   const maps = {
@@ -151,6 +171,124 @@
 
   function blank(value) {
     return value == null ? "" : String(value);
+  }
+
+  function currentViewLocation() {
+    if (!VIEW_LOCATION_SLUG) {
+      return null;
+    }
+    return (
+      state.config.locations.find(function findLocation(location) {
+        return blank(location.slug).trim().toLowerCase() === VIEW_LOCATION_SLUG;
+      }) || null
+    );
+  }
+
+  function locationById(locationId) {
+    return (
+      state.config.locations.find(function findLocation(location) {
+        return location.id === locationId;
+      }) || null
+    );
+  }
+
+  function locationPath(location) {
+    const slug = blank(location && location.slug).trim().toLowerCase();
+    return slug ? "/" + slug : "/";
+  }
+
+  function locationTvPath(location) {
+    const slug = blank(location && location.slug).trim().toLowerCase();
+    return slug ? "/" + slug + "/tv" : "/tv";
+  }
+
+  function displaySummariesForCurrentView() {
+    if (!state.analysis) {
+      return [];
+    }
+    return state.analysis.summary.byLocation.filter(function keepLocation(summary) {
+      const location = locationById(summary.locationId);
+      if (!location) {
+        return false;
+      }
+      if (VIEW_LOCATION_SLUG) {
+        return blank(location.slug).trim().toLowerCase() === VIEW_LOCATION_SLUG;
+      }
+      if (APP_MODE === "tv") {
+        return location.showOnTv !== false;
+      }
+      return location.showOnDashboard !== false;
+    });
+  }
+
+  function flightsForCurrentView() {
+    if (!state.analysis) {
+      return [];
+    }
+    const viewLocation = currentViewLocation();
+    if (!viewLocation) {
+      return state.analysis.flights.slice();
+    }
+    return state.analysis.flights.filter(function keepFlight(flight) {
+      return flightTouchesLocation(flight, viewLocation.id);
+    });
+  }
+
+  function summaryForCurrentView() {
+    if (!state.analysis) {
+      return null;
+    }
+    const scopedFlights = flightsForCurrentView();
+    const matchedFlights = scopedFlights.filter(function eachFlight(flight) {
+      return flight.assigned;
+    });
+    const times = scopedFlights
+      .map(function eachFlight(flight) {
+        return flight.landingAt || flight.takeoffAt;
+      })
+      .filter(Boolean)
+      .sort(function byTime(left, right) {
+        return left.getTime() - right.getTime();
+      });
+    return {
+      totalFlights: scopedFlights.length,
+      matchedFlights: matchedFlights.length,
+      unmatchedFlights: scopedFlights.length - matchedFlights.length,
+      avgMatchedMinutes:
+        matchedFlights.length
+          ? matchedFlights.reduce(function sum(total, flight) {
+              return total + flight.durationMinutes;
+            }, 0) / matchedFlights.length
+          : null,
+      locationCount: displaySummariesForCurrentView().length,
+      start: times[0] || null,
+      end: times[times.length - 1] || null,
+    };
+  }
+
+  function ensureViewSelections() {
+    const scopedLocation = currentViewLocation();
+    if (scopedLocation) {
+      state.selectedDashboardLocationId = scopedLocation.id;
+      if (!state.selectedLocationId) {
+        state.selectedLocationId = scopedLocation.id;
+      }
+    }
+    if (!state.selectedLocationId && state.config.locations[0]) {
+      state.selectedLocationId = state.config.locations[0].id;
+    }
+    const visibleSummaries = displaySummariesForCurrentView();
+    if (
+      visibleSummaries.length &&
+      !visibleSummaries.some(function hasLocation(locationSummary) {
+        return locationSummary.locationId === state.selectedDashboardLocationId;
+      })
+    ) {
+      state.selectedDashboardLocationId = visibleSummaries[0].locationId;
+      state.selectedDashboardTourId = "";
+      state.selectedDashboardRouteSet = "";
+      state.selectedDashboardQuickFilter = "";
+    }
   }
 
   function escapeHtml(value) {
@@ -514,11 +652,21 @@
     return state.flightAnnotations[flight.stableKey] || null;
   }
 
+  function displayLocationNameForFlight(flight) {
+    const assignedName = blank(flight && flight.locationName).trim();
+    if (assignedName && assignedName !== "Unassigned") {
+      return assignedName;
+    }
+    return blank(flight && flight.zoneHits && flight.zoneHits[0] && flight.zoneHits[0].locationName).trim() ||
+      "Unassigned";
+  }
+
   function latestCompletedFlight() {
-    if (!state.analysis || !Array.isArray(state.analysis.flights) || !state.analysis.flights.length) {
+    const flights = flightsForCurrentView();
+    if (!flights.length) {
       return null;
     }
-    return state.analysis.flights
+    return flights
       .slice()
       .sort(function byLatest(left, right) {
         const leftTime = left.landingAt || left.takeoffAt;
@@ -835,7 +983,7 @@
 
     const sharedCsv = blank(sharedState.csvText);
     if (sharedCsv.trim()) {
-      handleCsvText(sharedCsv);
+      handleCsvText(sharedCsv, { fileCount: 1 });
       return true;
     }
 
@@ -843,6 +991,7 @@
     state.headers = [];
     state.rowObjects = [];
     state.analysis = null;
+    state.csvImportCount = 0;
     state.selectedFlightId = "";
     state.flightSearchQuery = "";
     state.weatherByFlightId = {};
@@ -1250,6 +1399,26 @@
     syncAnalysis();
   }
 
+  function moveLocation(locationId, direction) {
+    const currentIndex = state.config.locations.findIndex(function findLocation(location) {
+      return location.id === locationId;
+    });
+    if (currentIndex < 0) {
+      return;
+    }
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= state.config.locations.length) {
+      return;
+    }
+    const reordered = state.config.locations.slice();
+    const movedLocation = reordered.splice(currentIndex, 1)[0];
+    reordered.splice(nextIndex, 0, movedLocation);
+    state.config.locations = reordered;
+    state.config = core.sanitizeConfig(state.config);
+    saveConfig();
+    syncAnalysis();
+  }
+
   function removeZones(zoneIds) {
     const ids = new Set(zoneIds);
     const location = currentLocation();
@@ -1276,8 +1445,10 @@
     syncAnalysis();
   }
 
-  function handleCsvText(csvText) {
+  function handleCsvText(csvText, options) {
+    const settings = options || {};
     state.csvText = csvText;
+    state.csvImportCount = settings.fileCount || state.csvImportCount || 1;
     saveSessionCsv(csvText);
     savePersistentCsv(csvText);
     const parsed = core.parseCsv(csvText);
@@ -1295,6 +1466,61 @@
     syncAnalysis();
   }
 
+  function mergeCsvTexts(csvTexts) {
+    const chunks = (Array.isArray(csvTexts) ? csvTexts : [])
+      .map(function normalizeChunk(text) {
+        return blank(text);
+      })
+      .filter(function keepChunk(text) {
+        return text.trim();
+      });
+
+    if (!chunks.length) {
+      return { csvText: "", headers: [], rowObjects: [] };
+    }
+
+    const mergedHeaders = [];
+    const mergedRows = [];
+
+    chunks.forEach(function eachChunk(text) {
+      const parsed = core.parseCsv(text);
+      if (!parsed.headers.length) {
+        return;
+      }
+      parsed.headers.forEach(function eachHeader(header) {
+        if (mergedHeaders.indexOf(header) === -1) {
+          mergedHeaders.push(header);
+        }
+      });
+      const chunkRows = core.rowsToObjects(parsed.headers, parsed.rows);
+      chunkRows.forEach(function eachRow(rowObject) {
+        const normalized = {};
+        mergedHeaders.forEach(function eachHeader(header) {
+          normalized[header] = rowObject[header] != null ? rowObject[header] : "";
+        });
+        mergedRows.push(normalized);
+      });
+    });
+
+    return {
+      csvText: core.serializeCsv(mergedHeaders, mergedRows),
+      headers: mergedHeaders,
+      rowObjects: mergedRows,
+    };
+  }
+
+  function appendCsvTexts(csvTexts) {
+    const incomingTexts = (Array.isArray(csvTexts) ? csvTexts : []).filter(function keepText(text) {
+      return blank(text).trim();
+    });
+    const combined = mergeCsvTexts(
+      (state.csvText.trim() ? [state.csvText] : []).concat(incomingTexts)
+    );
+    handleCsvText(combined.csvText, {
+      fileCount: (state.csvImportCount || 0) + incomingTexts.length,
+    });
+  }
+
   function clearCurrentSheet() {
     clearStoredCsv();
     setLoading(true, "Clearing uploaded sheet...");
@@ -1304,6 +1530,7 @@
         state.headers = [];
         state.rowObjects = [];
         state.analysis = null;
+        state.csvImportCount = 0;
         state.selectedFlightId = "";
         state.flightSearchQuery = "";
         state.weatherByFlightId = {};
@@ -1326,13 +1553,7 @@
     state.config = core.sanitizeConfig(state.config);
     seedMissingWeatherStations(state.config);
     saveConfig();
-
-    if (!state.selectedLocationId && state.config.locations[0]) {
-      state.selectedLocationId = state.config.locations[0].id;
-    }
-    if (!state.selectedDashboardLocationId && state.config.locations[0]) {
-      state.selectedDashboardLocationId = state.config.locations[0].id;
-    }
+    ensureViewSelections();
 
     if (!state.csvText.trim()) {
       state.analysis = null;
@@ -1341,16 +1562,18 @@
     }
 
     state.analysis = core.analyzeRows(state.rowObjects, state.config);
-    if (!state.selectedFlightId && state.analysis.flights[0]) {
-      state.selectedFlightId = state.analysis.flights[0].id;
+    ensureViewSelections();
+    const visibleFlights = flightsForCurrentView();
+    if (!state.selectedFlightId && visibleFlights[0]) {
+      state.selectedFlightId = visibleFlights[0].id;
     }
     if (
       state.selectedFlightId &&
-      !state.analysis.flights.some(function hasFlight(flight) {
+      !visibleFlights.some(function hasFlight(flight) {
         return flight.id === state.selectedFlightId;
       })
     ) {
-      state.selectedFlightId = state.analysis.flights[0] ? state.analysis.flights[0].id : "";
+      state.selectedFlightId = visibleFlights[0] ? visibleFlights[0].id : "";
     }
     render();
   }
@@ -1396,9 +1619,10 @@
     document.querySelectorAll(".tab-panel").forEach(function eachPanel(panel) {
       panel.classList.toggle("is-active", panel.id === state.activeTab + "Tab");
     });
+    const scopedSummary = summaryForCurrentView();
     elements.dateRangeLabel.textContent =
-      state.analysis && state.analysis.summary.start && state.analysis.summary.end
-        ? core.formatDateRange(state.analysis.summary.start, state.analysis.summary.end)
+      scopedSummary && scopedSummary.start && scopedSummary.end
+        ? core.formatDateRange(scopedSummary.start, scopedSummary.end)
         : "";
     if (elements.lastUpdatedLabel) {
       const publishedAtLabel = formatPublishedAtLabel(state.lastSharedPublishedAt);
@@ -1419,6 +1643,11 @@
     }
     const analysis = state.analysis;
     const markup =
+      (state.csvImportCount > 1
+        ? "<span class='pill pill--muted'>" +
+          escapeHtml(String(state.csvImportCount)) +
+          " files stacked</span>"
+        : "") +
       "<span class='pill'>" +
       escapeHtml(String(state.rowObjects.length)) +
       " rows</span>" +
@@ -1504,13 +1733,13 @@
         "<div class='empty-state'>Load a CSV to see flight counts and averages.</div>";
       return;
     }
-    const summary = state.analysis.summary;
+    const summary = summaryForCurrentView();
     elements.summaryCards.innerHTML =
       renderSummaryCard("Flights", summary.totalFlights) +
       renderSummaryCard("Matched Tours", summary.matchedFlights) +
       renderSummaryCard("Unmatched", summary.unmatchedFlights) +
       renderSummaryCard("Avg Matched", core.formatDuration(summary.avgMatchedMinutes)) +
-      renderSummaryCard("Locations", summary.byLocation.length);
+      renderSummaryCard("Locations", summary.locationCount);
   }
 
   function renderLatestFlightCard() {
@@ -1545,7 +1774,7 @@
       "</div></div>" +
       "<div class='latest-flight-card__grid'>" +
       "<div><span class='latest-flight-card__label'>Location</span><strong>" +
-      escapeHtml(flight.locationName || "Unassigned") +
+      escapeHtml(displayLocationNameForFlight(flight)) +
       "</strong></div>" +
       "<div><span class='latest-flight-card__label'>Tour</span><strong>" +
       escapeHtml(evaluation && evaluation.assigned ? evaluation.tourName : "No match") +
@@ -1655,19 +1884,30 @@
       return;
     }
 
+    const locationSummaries = displaySummariesForCurrentView();
+    if (!locationSummaries.length) {
+      elements.dashboardCards.innerHTML =
+        VIEW_LOCATION_SLUG
+          ? "<div class='empty-state'>No published location is using the route slug `" +
+            escapeHtml(VIEW_LOCATION_SLUG) +
+            "` yet.</div>"
+          : "<div class='empty-state'>No locations are enabled for this board view yet.</div>";
+      return;
+    }
+
     if (
-      !state.analysis.summary.byLocation.some(function hasLocation(location) {
+      !locationSummaries.some(function hasLocation(location) {
         return location.locationId === state.selectedDashboardLocationId;
       })
     ) {
-      state.selectedDashboardLocationId = state.analysis.summary.byLocation[0]
-        ? state.analysis.summary.byLocation[0].locationId
+      state.selectedDashboardLocationId = locationSummaries[0]
+        ? locationSummaries[0].locationId
         : "";
       state.selectedDashboardTourId = "";
       state.selectedDashboardRouteSet = "";
     }
 
-    const selectedLocationSummary = state.analysis.summary.byLocation.find(function findLocation(location) {
+    const selectedLocationSummary = locationSummaries.find(function findLocation(location) {
       return location.locationId === state.selectedDashboardLocationId;
     });
     if (
@@ -1677,10 +1917,13 @@
       state.selectedDashboardRouteSet = "";
     }
 
-    elements.dashboardCards.innerHTML = state.analysis.summary.byLocation
+    elements.dashboardCards.innerHTML = locationSummaries
       .map(function eachLocation(location) {
+        const configured = locationById(location.locationId) || {};
+        const sizeClass = " location-card--" + (configured.boardSize || "medium");
         return (
           "<article class='location-card" +
+          sizeClass +
           (location.locationId === state.selectedDashboardLocationId ? " is-selected" : "") +
           "' data-dashboard-location='" +
           escapeHtml(location.locationId) +
@@ -1713,7 +1956,7 @@
       return;
     }
 
-    const locationSummary = state.analysis.summary.byLocation.find(function findLocation(location) {
+    const locationSummary = displaySummariesForCurrentView().find(function findLocation(location) {
       return location.locationId === state.selectedDashboardLocationId;
     });
 
@@ -1740,8 +1983,8 @@
       state.selectedDashboardTourId = "";
     }
 
-    const locationFlights = state.analysis.flights.filter(function filterFlight(flight) {
-      if (flight.locationId !== locationSummary.locationId) {
+    const locationFlights = flightsForCurrentView().filter(function filterFlight(flight) {
+      if (!flightTouchesLocation(flight, locationSummary.locationId)) {
         return false;
       }
       if (!flightMatchesSelectedRouteSet(flight)) {
@@ -1772,7 +2015,7 @@
     const badFlights = flights.filter(function isBad(flight) {
       return !flight.assigned || !flightWithinGoalBuffer(flight);
     });
-    const operationalFlights = state.analysis.flights.filter(function filterOperationalFlight(flight) {
+    const operationalFlights = flightsForCurrentView().filter(function filterOperationalFlight(flight) {
       if (!currentFlightAnnotation(flight)) {
         return false;
       }
@@ -2001,7 +2244,8 @@
       elements.flightSearchInput.value = state.flightSearchQuery;
     }
 
-    const filteredFlights = state.analysis.flights.filter(function eachFlight(flight) {
+    const availableFlights = flightsForCurrentView();
+    const filteredFlights = availableFlights.filter(function eachFlight(flight) {
       return matchesFlightSearch(flight, state.flightSearchQuery);
     });
 
@@ -2017,14 +2261,14 @@
     elements.flightsMeta.innerHTML =
       "<span class='pill'>" +
       escapeHtml(String(filteredFlights.length)) +
-      (filteredFlights.length === state.analysis.summary.totalFlights
+      (filteredFlights.length === availableFlights.length
         ? " segmented flights"
         : " shown") +
       "</span>" +
-      (filteredFlights.length === state.analysis.summary.totalFlights
+      (filteredFlights.length === availableFlights.length
         ? ""
         : "<span class='pill pill--muted'>of " +
-          escapeHtml(String(state.analysis.summary.totalFlights)) +
+          escapeHtml(String(availableFlights.length)) +
           " total</span>");
 
     if (!filteredFlights.length) {
@@ -2049,7 +2293,7 @@
           "</td><td>" +
           escapeHtml(flight.durationLabel) +
           "</td><td>" +
-          escapeHtml(flight.locationName) +
+          escapeHtml(displayLocationNameForFlight(flight)) +
           "</td><td>" +
           renderMatchedTourCell(flight) +
           "</td><td>" +
@@ -2345,7 +2589,7 @@
 
   function renderLocationsSidebar() {
     elements.locationsSidebar.innerHTML = state.config.locations
-      .map(function eachLocation(location) {
+      .map(function eachLocation(location, index) {
         return (
           "<div class='stack-card" +
           (location.id === state.selectedLocationId ? " is-selected" : "") +
@@ -2355,9 +2599,25 @@
           escapeHtml(location.name) +
           "</h3><p>" +
           escapeHtml(location.zones.length + " zones / " + locationTours(location.id).length + " tours") +
-          "</p></div><span class='dot' style='background:" +
+          "</p><p class='stack-card__meta-line'>/" +
+          escapeHtml(location.slug || core.slugify(location.name)) +
+          " • " +
+          escapeHtml(location.boardSize || "medium") +
+          " card</p></div><span class='dot' style='background:" +
           escapeHtml(location.color) +
-          "; width:16px; height:16px;'></span></div></div>"
+          "; width:16px; height:16px;'></span></div><div class='stack-actions'><a class='button button--ghost button--small' href='" +
+          escapeHtml(locationPath(location)) +
+          "' target='_blank' rel='noreferrer'>Viewer</a><a class='button button--ghost button--small' href='" +
+          escapeHtml(locationTvPath(location)) +
+          "' target='_blank' rel='noreferrer'>TV</a><button class='button button--ghost button--small' type='button' data-action='move-location-up' data-location-id='" +
+          escapeHtml(location.id) +
+          "'" +
+          (index === 0 ? " disabled" : "") +
+          ">Up</button><button class='button button--ghost button--small' type='button' data-action='move-location-down' data-location-id='" +
+          escapeHtml(location.id) +
+          "'" +
+          (index === state.config.locations.length - 1 ? " disabled" : "") +
+          ">Down</button></div></div>"
         );
       })
       .join("");
@@ -2419,13 +2679,33 @@
       escapeHtml(location.name) +
       "' /></label><label class='field'><span>Short label</span><input data-location-field='shortName' type='text' value='" +
       escapeHtml(location.shortName) +
-      "' /></label><label class='field'><span>Route sets (comma-separated)</span><input data-location-field='routeSets' type='text' placeholder='Normal, TFR' value='" +
+      "' /></label><label class='field'><span>Viewer slug</span><input data-location-field='slug' type='text' placeholder='detroit' value='" +
+      escapeHtml(location.slug || core.slugify(location.name)) +
+      "' /></label><label class='field'><span>Board card size</span><select data-location-field='boardSize'><option value='small'" +
+      (location.boardSize === "small" ? " selected" : "") +
+      ">Small</option><option value='medium'" +
+      (location.boardSize === "medium" ? " selected" : "") +
+      ">Medium</option><option value='large'" +
+      (location.boardSize === "large" ? " selected" : "") +
+      ">Large</option></select></label><label class='field'><span>Route sets (comma-separated)</span><input data-location-field='routeSets' type='text' placeholder='Normal, TFR' value='" +
       escapeHtml((location.routeSets || []).join(", ")) +
       "' /></label><label class='field'><span>METAR stations (comma-separated)</span><input data-location-field='weatherStations' type='text' placeholder='KDET, KDTW' value='" +
       escapeHtml((location.weatherStations || []).join(", ")) +
       "' /></label><label class='field'><span>Theme color</span><input data-location-field='color' type='color' value='" +
       escapeHtml(location.color) +
-      "' /></label><div class='field'><span>&nbsp;</span><button id='removeLocationBtn' class='button button--ghost'>Remove Location</button></div></div></div><div class='editor-section'>" +
+      "' /></label><label class='field field--checkbox'><span>Show on main dashboard</span><input data-location-field='showOnDashboard' type='checkbox'" +
+      (location.showOnDashboard !== false ? " checked" : "") +
+      " /></label><label class='field field--checkbox'><span>Show on TV board</span><input data-location-field='showOnTv' type='checkbox'" +
+      (location.showOnTv !== false ? " checked" : "") +
+      " /></label><div class='field field--links'><span>Viewer links</span><div class='button-row'><a class='button button--ghost button--small' href='" +
+      escapeHtml(locationPath(location)) +
+      "' target='_blank' rel='noreferrer'>Open /" +
+      escapeHtml(location.slug || core.slugify(location.name)) +
+      "</a><a class='button button--ghost button--small' href='" +
+      escapeHtml(locationTvPath(location)) +
+      "' target='_blank' rel='noreferrer'>Open /" +
+      escapeHtml(location.slug || core.slugify(location.name)) +
+      "/tv</a></div></div><div class='field'><span>&nbsp;</span><button id='removeLocationBtn' class='button button--ghost'>Remove Location</button></div></div></div><div class='editor-section'>" +
       zonesMarkup +
       "</div>";
   }
@@ -2940,6 +3220,23 @@
     reader.readAsText(file);
   }
 
+  function readFilesAsText(files) {
+    return Promise.all(
+      (Array.isArray(files) ? files : Array.from(files || [])).map(function eachFile(file) {
+        return new Promise(function readPromise(resolve, reject) {
+          const reader = new FileReader();
+          reader.onload = function onLoad(event) {
+            resolve(String(event.target.result || ""));
+          };
+          reader.onerror = function onError() {
+            reject(new Error("That file could not be read."));
+          };
+          reader.readAsText(file);
+        });
+      })
+    );
+  }
+
   function summaryEmailBody() {
     if (!state.analysis) {
       return "No summary is available yet.";
@@ -2971,19 +3268,42 @@
     });
   });
 
-  elements.csvInput.addEventListener("change", function onCsvChange(event) {
-    const file = event.target.files[0];
-    if (!file) {
+  function importCsvFiles(files) {
+    const list = Array.from(files || []).filter(function keepFile(file) {
+      return Boolean(file);
+    });
+    if (!list.length) {
       return;
     }
-    readFile(file, function onText(text) {
-      setLoading(true, "Analyzing Spidertracks CSV...");
-      globalObject.setTimeout(function applyCsv() {
-        clearStatus();
-        handleCsvText(text);
+    setLoading(
+      true,
+      list.length > 1 ? "Stacking Spidertracks CSV files..." : "Analyzing Spidertracks CSV..."
+    );
+    readFilesAsText(list)
+      .then(function onTexts(texts) {
+        globalObject.setTimeout(function applyCsv() {
+          clearStatus();
+          appendCsvTexts(texts);
+          setStatus(
+            "success",
+            list.length > 1 || state.csvImportCount > list.length
+              ? "CSV files stacked into the current board. Use Clear Sheet when you want to start fresh."
+              : "CSV loaded."
+          );
+          setLoading(false);
+        }, 0);
+      })
+      .catch(function onError(error) {
         setLoading(false);
-      }, 0);
-    });
+        setStatus("error", error.message || "One of the CSV files could not be read.");
+      });
+  }
+
+  elements.csvInput.addEventListener("change", function onCsvChange(event) {
+    if (!event.target.files || !event.target.files.length) {
+      return;
+    }
+    importCsvFiles(event.target.files);
     event.target.value = "";
   });
 
@@ -3006,18 +3326,10 @@
   });
 
   elements.csvDropZone.addEventListener("drop", function onDrop(event) {
-    const file = event.dataTransfer.files[0];
-    if (!file) {
+    if (!event.dataTransfer.files || !event.dataTransfer.files.length) {
       return;
     }
-    readFile(file, function onText(text) {
-      setLoading(true, "Analyzing Spidertracks CSV...");
-      globalObject.setTimeout(function applyCsv() {
-        clearStatus();
-        handleCsvText(text);
-        setLoading(false);
-      }, 0);
-    });
+    importCsvFiles(event.dataTransfer.files);
   });
 
   elements.mappingPanel.addEventListener("change", function onMappingChange(event) {
@@ -3129,7 +3441,7 @@
     state.adminUnlocked = false;
     setLoading(true, "Loading demo sheet...");
     globalObject.setTimeout(function applyDemo() {
-      handleCsvText(core.SAMPLE_CSV);
+      handleCsvText(core.SAMPLE_CSV, { fileCount: 1 });
       setLoading(false);
       setStatus("success", "Demo CSV loaded without replacing your saved tours or zones.");
     }, 0);
@@ -3197,6 +3509,16 @@
   });
 
   elements.locationsSidebar.addEventListener("click", function onLocationClick(event) {
+    const moveUp = event.target.closest("[data-action='move-location-up']");
+    if (moveUp) {
+      moveLocation(moveUp.getAttribute("data-location-id"), -1);
+      return;
+    }
+    const moveDown = event.target.closest("[data-action='move-location-down']");
+    if (moveDown) {
+      moveLocation(moveDown.getAttribute("data-location-id"), 1);
+      return;
+    }
     const card = event.target.closest("[data-location-id]");
     if (!card) {
       return;
@@ -3212,8 +3534,12 @@
     const location = {
       id: core.makeId("location"),
       name: "New Location",
+      slug: core.slugify("New Location"),
       shortName: "NEW",
       color: "#4c6ef5",
+      boardSize: "medium",
+      showOnDashboard: true,
+      showOnTv: true,
       routeSets: ["Standard"],
       weatherStations: [],
       zones: [],
@@ -3293,6 +3619,15 @@
         }
         if (locationField === "weatherStations") {
           locationToEdit.weatherStations = parseStationIdentifiers(event.target.value);
+          return;
+        }
+        if (locationField === "showOnDashboard" || locationField === "showOnTv") {
+          locationToEdit[locationField] = Boolean(event.target.checked);
+          return;
+        }
+        if (locationField === "slug") {
+          locationToEdit.slug = core.slugify(event.target.value || locationToEdit.name);
+          event.target.value = locationToEdit.slug;
           return;
         }
         locationToEdit[locationField] = event.target.value;
@@ -3527,7 +3862,7 @@
       const csvToLoad = persistentCsv.trim() ? persistentCsv : savedCsv;
 
       if (csvToLoad.trim()) {
-        handleCsvText(csvToLoad);
+        handleCsvText(csvToLoad, { fileCount: 1 });
         return;
       }
 

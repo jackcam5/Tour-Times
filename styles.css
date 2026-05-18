@@ -741,16 +741,26 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #202530;
+  background: rgba(32, 37, 48, 0.96);
+  backdrop-filter: blur(10px);
 }
 
 .table tbody tr.is-selected,
 .stack-card.is-selected {
-  background: rgba(59, 130, 246, 0.1);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.018);
 }
 
 .table tbody tr {
   cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.table tbody tr:hover {
+  background: rgba(125, 211, 252, 0.06);
 }
 
 .table-empty-row td {
@@ -891,6 +901,28 @@ textarea {
 
 .flight-map-wrap {
   position: relative;
+}
+
+.scoped-board {
+  display: grid;
+  gap: 12px;
+}
+
+.scoped-board__table-card {
+  min-width: 0;
+}
+
+.scoped-board__table-wrap {
+  max-height: none;
+}
+
+.scoped-tour-table {
+  min-width: 980px;
+}
+
+.scoped-tour-table td:last-child {
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .map-empty-state {

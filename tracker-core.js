@@ -853,11 +853,10 @@
     if (diffMinutes == null) {
       return "muted";
     }
-    const absolute = Math.abs(diffMinutes);
-    if (absolute <= 0.5) {
+    if (diffMinutes <= 0) {
       return "good";
     }
-    if (absolute <= 1.25) {
+    if (diffMinutes <= 1.25) {
       return "warn";
     }
     return "bad";

@@ -107,6 +107,7 @@
     tourMatrix: document.getElementById("tourMatrix"),
     zoneInspector: document.getElementById("zoneInspector"),
     adminNonTourAnalytics: document.getElementById("adminNonTourAnalytics"),
+    adminLocationEfficiency: document.getElementById("adminLocationEfficiency"),
     configEditor: document.getElementById("configEditor"),
     dashboardTab: document.getElementById("dashboardTab"),
     flightsTab: document.getElementById("flightsTab"),
@@ -3153,6 +3154,7 @@
     renderTourMatrix();
     renderZoneInspector();
     renderAdminNonTourAnalytics();
+    renderAdminLocationEfficiency();
   }
 
   function renderAdminGate() {
@@ -3593,6 +3595,107 @@
             escapeHtml(row.topReason) +
             "</td><td>" +
             escapeHtml(row.topTail) +
+            "</td></tr>"
+          );
+        })
+        .join("") +
+      "</tbody></table></div></div>";
+  }
+
+  function summarizeLocationEfficiency() {
+    if (!state.analysis) {
+      return { rows: [], totalGoalMinutes: 0, totalActualMinutes: 0, totalDiffMinutes: 0, overGoalFlights: 0 };
+    }
+
+    const rows = state.config.locations
+      .map(function eachLocation(location) {
+        const flights = state.analysis.flights.filter(function eachFlight(flight) {
+          return flight.assigned && flight.locationId === location.id;
+        });
+        const goalMinutes = flights.reduce(function sum(total, flight) {
+          return total + ((flight.bestEvaluation && flight.bestEvaluation.goalMinutes) || 0);
+        }, 0);
+        const actualMinutes = flights.reduce(function sum(total, flight) {
+          return total + (Number(flight.durationMinutes) || 0);
+        }, 0);
+        const diffMinutes = actualMinutes - goalMinutes;
+        const overGoalFlights = flights.filter(function keepOverGoal(flight) {
+          return !flightWithinGoalBuffer(flight);
+        }).length;
+        return {
+          locationId: location.id,
+          locationName: location.name,
+          count: flights.length,
+          goalMinutes: goalMinutes,
+          actualMinutes: actualMinutes,
+          diffMinutes: diffMinutes,
+          overGoalFlights: overGoalFlights,
+          tone: flights.length ? core.toneForDifference(diffMinutes) : "muted",
+        };
+      })
+      .filter(function keepRow(row) {
+        return row.count > 0;
+      })
+      .sort(function byDiffThenCount(left, right) {
+        if (right.diffMinutes !== left.diffMinutes) {
+          return right.diffMinutes - left.diffMinutes;
+        }
+        return right.count - left.count;
+      });
+
+    return {
+      rows: rows,
+      totalGoalMinutes: rows.reduce(function sum(total, row) { return total + row.goalMinutes; }, 0),
+      totalActualMinutes: rows.reduce(function sum(total, row) { return total + row.actualMinutes; }, 0),
+      totalDiffMinutes: rows.reduce(function sum(total, row) { return total + row.diffMinutes; }, 0),
+      overGoalFlights: rows.reduce(function sum(total, row) { return total + row.overGoalFlights; }, 0),
+    };
+  }
+
+  function renderAdminLocationEfficiency() {
+    if (!elements.adminLocationEfficiency) {
+      return;
+    }
+    if (!state.analysis) {
+      elements.adminLocationEfficiency.innerHTML =
+        "<div class='empty-state'>Load stacked CSV exports to compare goal time versus actual time here.</div>";
+      return;
+    }
+
+    const summary = summarizeLocationEfficiency();
+    if (!summary.rows.length) {
+      elements.adminLocationEfficiency.innerHTML =
+        "<div class='empty-state'>No valid tour flights are available in the current sheet yet.</div>";
+      return;
+    }
+
+    const selectedLocationId = currentLocation() ? currentLocation().id : "";
+    elements.adminLocationEfficiency.innerHTML =
+      "<div class='admin-ops-grid'><div class='admin-ops-callout'><p class='muted'>Valid tour flights only.</p><h3>This shows the weekly goal time earned by completed tours versus the actual air time flown, so overflown minutes are visible at the location level.</h3><p class='muted'>Goal time is summed from each matched tour's configured goal. Custom and non-tour flights stay out of this table.</p></div><div class='summary-cards admin-ops-summary'>" +
+      renderSummaryCard("Goal Total", core.formatDuration(summary.totalGoalMinutes)) +
+      renderSummaryCard("Actual Total", core.formatDuration(summary.totalActualMinutes)) +
+      renderSummaryCard("Difference", core.formatDuration(summary.totalDiffMinutes)) +
+      renderSummaryCard("Over Goal Flights", summary.overGoalFlights) +
+      "</div><div class='table-wrap'><table class='table admin-ops-table'><thead><tr><th>Location</th><th>Tours Flown</th><th>Goal Total</th><th>Actual Total</th><th>Difference</th><th>Over Goal Flights</th></tr></thead><tbody>" +
+      summary.rows
+        .map(function eachRow(row) {
+          return (
+            "<tr" +
+            (row.locationId === selectedLocationId ? " class='is-selected'" : "") +
+            "><td>" +
+            escapeHtml(row.locationName) +
+            "</td><td>" +
+            escapeHtml(String(row.count)) +
+            "</td><td>" +
+            escapeHtml(core.formatDuration(row.goalMinutes)) +
+            "</td><td>" +
+            escapeHtml(core.formatDuration(row.actualMinutes)) +
+            "</td><td class='value-cell--" +
+            row.tone +
+            "'>" +
+            escapeHtml(core.formatDuration(row.diffMinutes)) +
+            "</td><td>" +
+            escapeHtml(String(row.overGoalFlights)) +
             "</td></tr>"
           );
         })

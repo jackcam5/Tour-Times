@@ -148,6 +148,7 @@
     lastSharedPublishedAt: "",
     pendingFlightDetailRefresh: false,
     csvImportCount: 0,
+    weatherByLocationId: {},
   };
 
   const maps = {
@@ -652,6 +653,19 @@
     return state.flightAnnotations[flight.stableKey] || null;
   }
 
+  function currentDashboardLocationSummary() {
+    return (
+      displaySummariesForCurrentView().find(function findLocation(location) {
+        return location.locationId === state.selectedDashboardLocationId;
+      }) || null
+    );
+  }
+
+  function currentDashboardLocation() {
+    const summary = currentDashboardLocationSummary();
+    return summary ? locationById(summary.locationId) : null;
+  }
+
   function displayLocationNameForFlight(flight) {
     const assignedName = blank(flight && flight.locationName).trim();
     if (assignedName && assignedName !== "Unassigned") {
@@ -904,6 +918,10 @@
     return state.weatherByFlightId[flightId] || { status: "idle", data: null, error: "" };
   }
 
+  function locationWeatherState(locationId) {
+    return state.weatherByLocationId[locationId] || { status: "idle", data: null, error: "" };
+  }
+
   function formatWeatherObserved(isoText) {
     if (!isoText) {
       return "Unknown";
@@ -940,6 +958,49 @@
     return location && Array.isArray(location.weatherStations)
       ? location.weatherStations.filter(Boolean).slice(0, 8)
       : [];
+  }
+
+  function weatherStationsForLocation(location) {
+    return location && Array.isArray(location.weatherStations)
+      ? location.weatherStations.filter(Boolean).slice(0, 8)
+      : [];
+  }
+
+  function locationReferencePoint(locationId) {
+    const location = locationById(locationId);
+    if (location && Array.isArray(location.zones) && location.zones.length) {
+      const totals = location.zones.reduce(
+        function accumulate(acc, zone) {
+          const centerLat = (Number(zone.box.minLat) + Number(zone.box.maxLat)) / 2;
+          const centerLng = (Number(zone.box.minLng) + Number(zone.box.maxLng)) / 2;
+          if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) {
+            return acc;
+          }
+          acc.lat += centerLat;
+          acc.lng += centerLng;
+          acc.count += 1;
+          return acc;
+        },
+        { lat: 0, lng: 0, count: 0 }
+      );
+      if (totals.count) {
+        return {
+          lat: totals.lat / totals.count,
+          lng: totals.lng / totals.count,
+        };
+      }
+    }
+
+    const candidate = flightsForCurrentView().find(function findFlight(flight) {
+      return flightTouchesLocation(flight, locationId) && flight.midLatitude && flight.midLongitude;
+    });
+    if (candidate) {
+      return {
+        lat: candidate.midLatitude,
+        lng: candidate.midLongitude,
+      };
+    }
+    return null;
   }
 
   function loadSharedState() {
@@ -995,6 +1056,7 @@
     state.selectedFlightId = "";
     state.flightSearchQuery = "";
     state.weatherByFlightId = {};
+    state.weatherByLocationId = {};
     clearStoredCsv();
     render();
     return true;
@@ -1152,6 +1214,74 @@
           error: message,
         };
         refreshSelectedFlightDetail({ flightId: flight.id });
+      });
+  }
+
+  function loadWeatherForLocation(location) {
+    if (!location || !location.id) {
+      return;
+    }
+    const point = locationReferencePoint(location.id);
+    if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) {
+      state.weatherByLocationId[location.id] = {
+        status: "error",
+        data: null,
+        error: "Current weather needs a zone or a completed flight to anchor the lookup.",
+      };
+      if (state.activeTab === "dashboard") {
+        renderDashboardDetail();
+      }
+      return;
+    }
+
+    const current = locationWeatherState(location.id);
+    if (current.status === "loading" || current.status === "loaded") {
+      return;
+    }
+    if (!globalObject.fetch || globalObject.location.protocol === "file:") {
+      state.weatherByLocationId[location.id] = {
+        status: "error",
+        data: null,
+        error: "Current weather requires running the app from the server.",
+      };
+      if (state.activeTab === "dashboard") {
+        renderDashboardDetail();
+      }
+      return;
+    }
+
+    state.weatherByLocationId[location.id] = { status: "loading", data: null, error: "" };
+    const url =
+      "/api/weather?lat=" +
+      encodeURIComponent(String(point.lat)) +
+      "&lon=" +
+      encodeURIComponent(String(point.lng)) +
+      "&time=" +
+      encodeURIComponent(new Date().toISOString()) +
+      (weatherStationsForLocation(location).length
+        ? "&stations=" + encodeURIComponent(weatherStationsForLocation(location).join(","))
+        : "");
+
+    fetchJsonWithTimeout(url, {}, WEATHER_REQUEST_TIMEOUT_MS)
+      .then(function onPayload(payload) {
+        state.weatherByLocationId[location.id] = { status: "loaded", data: payload, error: "" };
+        if (state.activeTab === "dashboard") {
+          renderDashboardDetail();
+        }
+      })
+      .catch(function onError(error) {
+        const message =
+          error && (error.name === "AbortError" || /abort/i.test(blank(error.message)))
+            ? "Current weather lookup timed out."
+            : "Current weather is unavailable right now.";
+        state.weatherByLocationId[location.id] = {
+          status: "error",
+          data: null,
+          error: message,
+        };
+        if (state.activeTab === "dashboard") {
+          renderDashboardDetail();
+        }
       });
   }
 
@@ -1449,6 +1579,8 @@
     const settings = options || {};
     state.csvText = csvText;
     state.csvImportCount = settings.fileCount || state.csvImportCount || 1;
+    state.weatherByFlightId = {};
+    state.weatherByLocationId = {};
     saveSessionCsv(csvText);
     savePersistentCsv(csvText);
     const parsed = core.parseCsv(csvText);
@@ -1534,6 +1666,7 @@
         state.selectedFlightId = "";
         state.flightSearchQuery = "";
         state.weatherByFlightId = {};
+        state.weatherByLocationId = {};
         state.flightAnnotations = {};
         saveFlightAnnotations();
         render();
@@ -1592,6 +1725,7 @@
         elements.dashboardDetail.innerHTML = "";
       } else {
         renderDashboardDetail();
+        loadWeatherForLocation(currentDashboardLocation());
       }
     }
 
@@ -1949,6 +2083,121 @@
       .join("");
   }
 
+  function renderLocationStatCard(label, value, meta) {
+    return (
+      "<div class='location-insight-card'><span class='location-insight-card__label'>" +
+      escapeHtml(label) +
+      "</span><strong>" +
+      escapeHtml(value || "—") +
+      "</strong>" +
+      (meta ? "<p>" + escapeHtml(meta) + "</p>" : "") +
+      "</div>"
+    );
+  }
+
+  function longestDurationFlight(flights) {
+    return (flights || [])
+      .slice()
+      .sort(function byDuration(left, right) {
+        return right.durationMinutes - left.durationMinutes;
+      })[0] || null;
+  }
+
+  function shortestGoalRow(rows) {
+    return (rows || [])
+      .filter(function keepRow(row) {
+        return row.goalMinutes > 0;
+      })
+      .slice()
+      .sort(function byGoal(left, right) {
+        return left.goalMinutes - right.goalMinutes;
+      })[0] || null;
+  }
+
+  function longestGoalRow(rows) {
+    return (rows || [])
+      .filter(function keepRow(row) {
+        return row.goalMinutes > 0;
+      })
+      .slice()
+      .sort(function byGoal(left, right) {
+        return right.goalMinutes - left.goalMinutes;
+      })[0] || null;
+  }
+
+  function renderLocationInsights(locationSummary, filteredRows, locationFlights) {
+    const location = locationById(locationSummary.locationId);
+    const weather = locationWeatherState(locationSummary.locationId);
+    const shortestTour = shortestGoalRow(filteredRows);
+    const longestTour = longestGoalRow(filteredRows);
+    const longestFlight = longestDurationFlight(locationFlights);
+    const longestFlightAnnotation = currentFlightAnnotation(longestFlight);
+    const routeSetLabel = state.selectedDashboardRouteSet || "All Route Sets";
+    const viewerPath = location ? locationPath(location) : "";
+    const viewerTvPath = location ? locationTvPath(location) : "";
+
+    return (
+      "<div class='location-insights-grid'><div class='detail-card location-insights-card'><div class='panel__header'><div><h3>Location Brief</h3><p class='muted'>Current conditions and high-level context for " +
+      escapeHtml(locationSummary.name) +
+      ".</p></div></div>" +
+      renderWeatherCard(weather, {
+        title: "Current Weather",
+        idleMessage: "Current METAR will load here for this location.",
+        loadingMessage: "Checking the current METAR for this location...",
+        noDataMessage: "No current METAR was found for this location.",
+        wrapperClass: "location-weather-card",
+      }) +
+      "<div class='location-insight-stats'>" +
+      renderLocationStatCard(
+        "Shortest Planned Tour",
+        shortestTour ? shortestTour.name + " • " + core.formatDuration(shortestTour.goalMinutes) : "No Data",
+        shortestTour ? routeSetLabel : "No completed planning data yet"
+      ) +
+      renderLocationStatCard(
+        "Longest Planned Tour",
+        longestTour ? longestTour.name + " • " + core.formatDuration(longestTour.goalMinutes) : "No Data",
+        longestTour ? routeSetLabel : "No completed planning data yet"
+      ) +
+      renderLocationStatCard(
+        "Longest Flight This Period",
+        longestFlight
+          ? displayLocationNameForFlight(longestFlight) + " • " + longestFlight.durationLabel
+          : "No Data",
+        longestFlight
+          ? (longestFlight.bestEvaluation && longestFlight.bestEvaluation.tourName
+              ? longestFlight.bestEvaluation.tourName
+              : "No match")
+          : "No completed flights yet"
+      ) +
+      renderLocationStatCard(
+        "Viewer Links",
+        viewerPath || "—",
+        viewerTvPath ? viewerTvPath + " for TV" : ""
+      ) +
+      "</div>" +
+      (longestFlight
+        ? "<div class='location-longest-flight-note'><h4>Longest flight context</h4><p><strong>" +
+          escapeHtml(longestFlight.tailNumber) +
+          "</strong> ran " +
+          escapeHtml(longestFlight.durationLabel) +
+          (longestFlight.bestEvaluation && longestFlight.bestEvaluation.goalMinutes
+            ? " against a goal of " +
+              escapeHtml(core.formatDuration(longestFlight.bestEvaluation.goalMinutes))
+            : "") +
+          ".</p>" +
+          (longestFlightAnnotation
+            ? "<p><span class='pill pill--annotation'>" +
+              escapeHtml(blank(longestFlightAnnotation.reason).trim() || "Saved note") +
+              "</span> " +
+              escapeHtml(blank(longestFlightAnnotation.note).trim() || "A reason was saved for this outlier.") +
+              "</p>"
+            : "<p class='muted'>No saved reason was attached to the longest flight yet.</p>") +
+          "</div>"
+        : "") +
+      "</div></div>"
+    );
+  }
+
   function renderDashboardDetail() {
     if (!state.analysis) {
       elements.dashboardDetail.innerHTML =
@@ -2106,8 +2355,20 @@
         .join("") +
       "</div>";
 
+    const filteredRows = locationSummary.rows.filter(function filterByCurrentRouteAndTour(row) {
+      if (state.selectedDashboardRouteSet && blank(row.routeSet).trim() !== state.selectedDashboardRouteSet) {
+        return false;
+      }
+      if (state.selectedDashboardTourId && row.tourId !== state.selectedDashboardTourId) {
+        return false;
+      }
+      return true;
+    });
+
     elements.dashboardDetail.innerHTML =
-      "<div class='dashboard-detail-stack'><div class='detail-card detail-card--filters'><div class='panel__header'><div><h3>" +
+      "<div class='dashboard-detail-stack'>" +
+      renderLocationInsights(locationSummary, filteredRows, locationFlights) +
+      "<div class='detail-card detail-card--filters'><div class='panel__header'><div><h3>" +
       escapeHtml(locationSummary.name) +
       "</h3><p class='muted'>Click a tour to filter the flights listed for this location.</p></div><div class='card-header__meta'><span class='pill pill--good'>" +
       escapeHtml(String(goodFlights.length)) +
@@ -2469,21 +2730,53 @@
 
   function renderWeatherCard(weather, options) {
     const compact = options && options.compact;
-    const wrapperClass = compact ? "map-overlay-card__inner" : "detail-card";
+    const wrapperClass =
+      (options && options.wrapperClass) || (compact ? "map-overlay-card__inner" : "detail-card");
     const gridClass = compact ? "weather-grid weather-grid--compact" : "weather-grid";
+    const title = (options && options.title) || "Flight Weather";
+    const outOfRangeMessage =
+      (options && options.outOfRangeMessage) ||
+      "METAR history is only shown for flights within the last 7 days.";
+    const noDataMessage =
+      (options && options.noDataMessage) ||
+      "No METAR was found near this flight time.";
+    const loadingMessage =
+      (options && options.loadingMessage) ||
+      "Checking the nearest METAR...";
+    const idleMessage =
+      (options && options.idleMessage) ||
+      "Weather details will appear here.";
+
+    if (weather.status === "idle") {
+      return (
+        "<div class='" +
+        wrapperClass +
+        "'><h3>" +
+        escapeHtml(title) +
+        "</h3><p class='muted'>" +
+        escapeHtml(idleMessage) +
+        "</p></div>"
+      );
+    }
 
     if (weather.status === "loading") {
       return (
         "<div class='" +
         wrapperClass +
-        "'><h3>Flight Weather</h3><p class='muted'>Checking the nearest METAR...</p></div>"
+        "'><h3>" +
+        escapeHtml(title) +
+        "</h3><p class='muted'>" +
+        escapeHtml(loadingMessage) +
+        "</p></div>"
       );
     }
     if (weather.status === "error") {
       return (
         "<div class='" +
         wrapperClass +
-        "'><h3>Flight Weather</h3><p class='muted'>" +
+        "'><h3>" +
+        escapeHtml(title) +
+        "</h3><p class='muted'>" +
         escapeHtml(weather.error) +
         "</p></div>"
       );
@@ -2495,20 +2788,30 @@
         return (
           "<div class='" +
           wrapperClass +
-          "'><h3>Flight Weather</h3><p class='muted'>METAR history is only shown for flights within the last 7 days.</p></div>"
+          "'><h3>" +
+          escapeHtml(title) +
+          "</h3><p class='muted'>" +
+          escapeHtml(outOfRangeMessage) +
+          "</p></div>"
         );
       }
       if (!metar) {
         return (
           "<div class='" +
           wrapperClass +
-          "'><h3>Flight Weather</h3><p class='muted'>No METAR was found near this flight time.</p></div>"
+          "'><h3>" +
+          escapeHtml(title) +
+          "</h3><p class='muted'>" +
+          escapeHtml(noDataMessage) +
+          "</p></div>"
         );
       }
       return (
         "<div class='" +
         wrapperClass +
-        "'><div class='panel__header'><div><h3>Flight Weather</h3><p class='muted'>" +
+        "'><div class='panel__header'><div><h3>" +
+        escapeHtml(title) +
+        "</h3><p class='muted'>" +
         escapeHtml(
           (metar.stationId || "Station") +
             (metar.stationName ? " • " + metar.stationName : "") +
@@ -3397,6 +3700,15 @@
   });
 
   elements.dashboardCards.addEventListener("click", function onDashboardClick(event) {
+    const rowTarget = event.target.closest("tr[data-dashboard-tour]");
+    const cardTarget = event.target.closest(".location-card[data-dashboard-location]");
+    if (cardTarget && !rowTarget && APP_MODE === "public" && !VIEW_LOCATION_SLUG) {
+      const location = locationById(cardTarget.getAttribute("data-dashboard-location"));
+      if (location && location.slug) {
+        globalObject.location.href = locationPath(location);
+        return;
+      }
+    }
     const locationTarget = event.target.closest("[data-dashboard-location]");
     if (!locationTarget) {
       return;

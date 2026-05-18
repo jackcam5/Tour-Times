@@ -619,6 +619,7 @@ textarea {
   overflow: hidden;
   background: var(--panel-2);
   border: 1px solid var(--line);
+  cursor: pointer;
 }
 
 .location-card--small {
@@ -1049,6 +1050,80 @@ textarea {
   gap: 12px;
 }
 
+.location-insights-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr);
+  gap: 12px;
+}
+
+.location-insights-card {
+  display: grid;
+  gap: 12px;
+}
+
+.location-weather-card {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.location-insight-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.location-insight-card {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.location-insight-card__label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.location-insight-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.location-insight-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.location-longest-flight-note {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.location-longest-flight-note h4,
+.location-longest-flight-note p {
+  margin: 0;
+}
+
+.location-longest-flight-note h4 {
+  margin-bottom: 8px;
+  font-size: 0.92rem;
+}
+
+.location-longest-flight-note p + p {
+  margin-top: 8px;
+}
+
 .dashboard-detail-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1413,6 +1488,11 @@ body.mode-tv .last-updated {
     grid-template-columns: 1fr;
   }
 
+  .location-insight-stats,
+  .location-insights-grid {
+    grid-template-columns: 1fr;
+  }
+
   .weather-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1504,6 +1584,8 @@ body.mode-tv .last-updated {
   .dashboard-grid,
   .gate-form,
   .dashboard-detail-grid,
+  .location-insight-stats,
+  .location-insights-grid,
   .weather-grid {
     grid-template-columns: 1fr;
   }

@@ -745,7 +745,7 @@
         key: "__needs_review__",
         label: "Needs Review",
         count: locationFlights.filter(function eachFlight(flight) {
-          return isNonTourFlight(flight);
+          return !flight.assigned || !flightWithinGoalBuffer(flight);
         }).length,
       },
     ];
@@ -793,7 +793,7 @@
       return true;
     }
     if (filterKey === "__needs_review__") {
-      return isNonTourFlight(flight);
+      return !flight.assigned || !flightWithinGoalBuffer(flight);
     }
     const annotation = currentFlightAnnotation(flight);
     return normalizeFilterKey(annotation && annotation.reason) === filterKey;
@@ -803,22 +803,22 @@
     return Boolean(
       flight &&
         flight.bestEvaluation &&
-        flight.bestEvaluation.plannedRouteMatch &&
-        !flight.bestEvaluation.withinGoalBuffer
+        flight.bestEvaluation.allZonesHit &&
+        !flight.bestEvaluation.withinDurationWindow
     );
   }
 
   function flightWithinGoalBuffer(flight) {
     return Boolean(
       flight &&
+        flight.assigned &&
         flight.bestEvaluation &&
-        flight.bestEvaluation.plannedRouteMatch &&
         flight.bestEvaluation.withinGoalBuffer
     );
   }
 
   function isNonTourFlight(flight) {
-    return Boolean(flight) && !flightWithinGoalBuffer(flight);
+    return Boolean(flight) && !flight.assigned;
   }
 
   function inferredNonTourReason(flight) {
@@ -829,9 +829,6 @@
     }
     if (flightExceededTourParameters(flight)) {
       return "Custom Flight";
-    }
-    if (flight && flight.bestEvaluation && flight.bestEvaluation.allZonesHit) {
-      return "Outside Duration";
     }
     if (flight && flight.zoneHits && flight.zoneHits.length) {
       return "No Matching Tour";
@@ -847,11 +844,8 @@
     if (evaluation.assigned) {
       return evaluation.tourName;
     }
-    if (evaluation.plannedRouteMatch) {
-      return "Custom Flight";
-    }
     if (evaluation.allZonesHit) {
-      return "Outside Duration";
+      return "Custom Flight";
     }
     return "No match";
   }
@@ -2518,10 +2512,10 @@
       return flightMatchesDashboardQuickFilter(flight);
     });
     const goodFlights = flights.filter(function isGood(flight) {
-      return !isNonTourFlight(flight);
+      return flightWithinGoalBuffer(flight);
     });
     const badFlights = flights.filter(function isBad(flight) {
-      return isNonTourFlight(flight);
+      return !flight.assigned || !flightWithinGoalBuffer(flight);
     });
     const operationalFlights = flightsForCurrentView().filter(function filterOperationalFlight(flight) {
       if (!currentFlightAnnotation(flight)) {
@@ -2707,8 +2701,8 @@
     if (flightExceededTourParameters(flight)) {
       return "<span class='pill pill--bad'>Custom Flight</span>";
     }
-    if (flight.bestEvaluation.allZonesHit) {
-      return "<span class='pill pill--warn'>Outside Duration</span>";
+    if (flight.assigned) {
+      return "<span class='pill pill--warn'>Over Goal</span>";
     }
     return "<span class='pill pill--muted'>Unassigned</span>";
   }
@@ -2726,11 +2720,11 @@
     const evaluation = flight.bestEvaluation;
     const tourName = primaryTourLabelForFlight(flight);
     const routeSet =
-      evaluation && (evaluation.assigned || evaluation.plannedRouteMatch) && blank(evaluation.routeSet).trim()
+      evaluation && (evaluation.assigned || evaluation.allZonesHit) && blank(evaluation.routeSet).trim()
         ? "<span class='pill pill--tag'>" + escapeHtml(blank(evaluation.routeSet).trim()) + "</span>"
         : "";
     const sourceTour =
-      evaluation && !evaluation.assigned && evaluation.plannedRouteMatch
+      evaluation && !evaluation.assigned && evaluation.allZonesHit
         ? "<span class='pill pill--muted'>" + escapeHtml(evaluation.tourName) + "</span>"
         : "";
     return (
@@ -2914,9 +2908,6 @@
         if (left.assigned !== right.assigned) {
           return left.assigned ? -1 : 1;
         }
-        if (left.plannedRouteMatch !== right.plannedRouteMatch) {
-          return left.plannedRouteMatch ? -1 : 1;
-        }
         return right.matchScore - left.matchScore;
       })
       .map(function eachEvaluation(evaluation) {
@@ -2937,11 +2928,11 @@
           escapeHtml(core.formatDuration(evaluation.goalMinutes)) +
           "</p><div class='card-header__meta'>" +
           (evaluation.assigned
-            ? "<span class='pill pill--good'>Matched</span>"
-            : evaluation.plannedRouteMatch
-              ? "<span class='pill pill--bad'>Custom Flight</span>"
+            ? evaluation.withinGoalBuffer
+              ? "<span class='pill pill--good'>Matched</span>"
+              : "<span class='pill pill--warn'>Over Goal</span>"
             : evaluation.allZonesHit
-              ? "<span class='pill pill--warn'>Zone match but duration out of range</span>"
+              ? "<span class='pill pill--bad'>Custom Flight</span>"
               : "<span class='pill pill--muted'>Did not qualify</span>") +
           "<span class='pill'>" +
           escapeHtml(core.formatDuration(evaluation.diffFromGoal)) +

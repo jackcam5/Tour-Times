@@ -795,7 +795,7 @@
         allZonesHit: allZonesHit,
         withinDurationWindow: withinDurationWindow,
         plannedRouteMatch: plannedRouteMatch,
-        assigned: plannedRouteMatch && withinGoalBuffer,
+        assigned: plannedRouteMatch,
         minMinutes: tour.minMinutes,
         maxMinutes: tour.maxMinutes,
         goalMinutes: tour.goalMinutes,
@@ -833,11 +833,11 @@
     flight.status = !bestEvaluation
       ? "Unassigned"
       : bestEvaluation.assigned
-        ? "On Plan"
-        : bestEvaluation.plannedRouteMatch
-          ? "Custom Flight"
+        ? bestEvaluation.withinGoalBuffer
+          ? "On Plan"
+          : "Over Goal"
         : bestEvaluation.allZonesHit
-          ? "Outside Duration"
+          ? "Custom Flight"
           : "Unassigned";
     return flight;
   }
